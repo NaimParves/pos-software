@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body { background: #f8f8fb; color: #495057; font-size: 13px; }
+
+input[type='number']::-webkit-inner-spin-button { opacity: 0.4; }
+
+.invoice-a4 { max-width: 210mm; }
+
+@media print {
+  @page { size: A4; margin: 8mm; }
+  .print-area { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+}
