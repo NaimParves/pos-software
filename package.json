@@ -9,6 +9,7 @@
     "server": "node server/index.js",
     "server:dev": "node --watch-path=server server/index.js",
     "build": "vite build",
+    "build:demo": "vite build --mode demo",
     "start": "npm run build && node server/index.js",
     "preview": "vite preview"
   },

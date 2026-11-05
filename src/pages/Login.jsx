@@ -39,6 +39,13 @@ export default function Login() {
         <div className="flex-1 flex flex-col justify-center lg:justify-start lg:pt-10 max-w-xl w-full mx-auto py-10">
           <h2 className="font-['Playfair_Display'] text-2xl text-center text-gray-800 font-bold">{SHOP.name}</h2>
           <p className="text-center text-sm text-gray-600 mt-1 mb-10">Use credentials to access your account.</p>
+          {import.meta.env.VITE_DEMO && (
+            <div className="-mt-6 mb-6 rounded border border-warning/50 bg-warning/10 px-4 py-3 text-[13px] text-gray-700">
+              <b>Demo version</b> with sample data. Sign in with phone <b>admin</b> and password <b>admin123</b>.
+              Changes are saved only in your own browser.
+              <button type="button" className="block mt-1 text-primary underline" onClick={() => { setPhone('admin'); setPassword('admin123') }}>Fill in demo login</button>
+            </div>
+          )}
           <form onSubmit={submit} className="space-y-4">
             <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone Number" className="w-full bg-[#f5f5f5] border border-gray-200 rounded px-4 py-2.5 text-sm focus:outline-none focus:border-success" />
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full bg-[#f5f5f5] border border-gray-200 rounded px-4 py-2.5 text-sm focus:outline-none focus:border-success" />
