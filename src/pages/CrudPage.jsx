@@ -4,6 +4,7 @@ import { PageHeader, Card, Field, Input, Select, Textarea, Button } from '../com
 import Combo from '../components/Combo'
 import DataTable from '../components/DataTable'
 import { db, useDb } from '../store/db'
+import { useCan } from '../store/permissions'
 import { displayDate, inRange, money, today } from '../utils/format'
 
 // Generic "form on top, list below" screen built from a config object:
@@ -12,6 +13,7 @@ import { displayDate, inRange, money, today } from '../utils/format'
 export default function CrudPage({ config }) {
   const state = useDb()
   const c = config
+  const allow = useCan()
   const initial = () => Object.fromEntries(c.fields.map((fl) => [fl.key, fl.default === 'today' ? today() : fl.default ?? '']))
   const [f, setF] = useState(initial)
   const [editId, setEditId] = useState(null)
@@ -60,11 +62,11 @@ export default function CrudPage({ config }) {
       key: fl.key, label: fl.label, align: fl.type === 'number' ? 'right' : undefined,
       render: fl.render || ((r) => (fl.type === 'date' ? displayDate(r[fl.key]) : fl.money ? money(r[fl.key]) : String(r[fl.key] ?? ''))),
     })),
-    ...(c.listOnly ? [] : [{
+    ...(c.listOnly || (!allow.edit && !allow.delete) ? [] : [{
       key: 'action', label: 'Action', render: (r) => (
         <div className="flex gap-1">
-          {!c.noEdit && <Button color="info" className="!px-2 !py-1" onClick={() => { setF({ ...initial(), ...r, password: '' }); setEditId(r.id); window.scrollTo({ top: 0, behavior: 'smooth' }) }}><Pencil size={13} /></Button>}
-          <Button color="danger" className="!px-2 !py-1" onClick={() => confirm('Delete this record?') && db.remove(c.collection, r.id)}><Trash2 size={13} /></Button>
+          {!c.noEdit && allow.edit && <Button color="info" className="!px-2 !py-1" onClick={() => { setF({ ...initial(), ...r, password: '' }); setEditId(r.id); window.scrollTo({ top: 0, behavior: 'smooth' }) }}><Pencil size={13} /></Button>}
+          {allow.delete && <Button color="danger" className="!px-2 !py-1" onClick={() => confirm('Delete this record?') && db.remove(c.collection, r.id)}><Trash2 size={13} /></Button>}
         </div>
       ),
     }]),

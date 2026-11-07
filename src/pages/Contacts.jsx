@@ -4,6 +4,7 @@ import { MoreHorizontal, User } from 'lucide-react'
 import { PageHeader, Card, Field, Input, Button } from '../components/ui'
 import DataTable from '../components/DataTable'
 import { db, useCollection } from '../store/db'
+import { useCan } from '../store/permissions'
 
 const LABEL = { customer: 'Customer', retailer: 'Retailer', supplier: 'Supplier', employee: 'Employee', reference: 'Reference' }
 const blank = { name: '', organization: '', address: '', phone: '', altPhone: '', nid: '', openingBalance: '', designation: '', salary: '', image: '' }
@@ -16,6 +17,7 @@ export default function Contacts() {
   const [f, setF] = useState(blank)
   const [editId, setEditId] = useState(null)
   const [menu, setMenu] = useState(null)
+  const allow = useCan()
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value })
 
   const save = async () => {
@@ -43,19 +45,19 @@ export default function Contacts() {
     { key: 'address', label: 'Address' },
     { key: 'phone', label: 'Phone' },
     { key: 'altPhone', label: 'Alternative Phone' },
-    {
+    ...(!allow.edit && !allow.delete ? [] : [{
       key: 'action', label: 'Action', render: (c) => (
         <div className="relative">
           <button onClick={() => setMenu(menu === c.id ? null : c.id)} className="px-2 text-gray-600"><MoreHorizontal size={16} /></button>
           {menu === c.id && (
             <div className="absolute right-0 z-20 bg-white border rounded shadow w-24 text-[13px]" onMouseLeave={() => setMenu(null)}>
-              <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50" onClick={() => { setF({ ...blank, ...c }); setEditId(c.id); setMenu(null) }}>Edit</button>
-              <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50 text-danger" onClick={() => { if (confirm(`Delete ${c.name}?`)) db.remove('contacts', c.id); setMenu(null) }}>Delete</button>
+              {allow.edit && <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50" onClick={() => { setF({ ...blank, ...c }); setEditId(c.id); setMenu(null) }}>Edit</button>}
+              {allow.delete && <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50 text-danger" onClick={() => { if (confirm(`Delete ${c.name}?`)) db.remove('contacts', c.id); setMenu(null) }}>Delete</button>}
             </div>
           )}
         </div>
       ),
-    },
+    }]),
   ]
 
   return (

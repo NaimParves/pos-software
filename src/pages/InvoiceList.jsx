@@ -1,15 +1,21 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, Printer, Trash2, Search, Truck, Pencil } from 'lucide-react'
+import { Eye, Printer, Trash2, Search, Truck, Pencil, Undo2, PackageCheck } from 'lucide-react'
 import { PageHeader, Card, Field, Input, Select, Button, Modal, Badge } from '../components/ui'
 import DataTable from '../components/DataTable'
 import InvoicePrint from '../components/InvoicePrint'
+import { DeliveryButton } from '../components/Delivery'
 import { db, useCollection } from '../store/db'
+import { useCan } from '../store/permissions'
 import { displayDate, inRange, money } from '../utils/format'
 
 // stockSign: how the document moved stock when saved (deleting reverses it)
-export default function InvoiceList({ title, collection, partyLabel = 'Customer', partyTypes = ['customer', 'retailer'], stockSign = 0, challan = false, delivery = false, editPath = '' }) {
+// editPath: string or (doc) => string. returnPath: the action column shows a
+// Return button (to that return page) instead of View. receivePath: P/O list,
+// shows Order Receive (opens the purchase page filled from the P/O) instead of Print.
+export default function InvoiceList({ title, collection, partyLabel = 'Customer', partyTypes = ['customer', 'retailer'], stockSign = 0, challan = false, delivery = false, editPath = '', returnPath = '', returnLabel = 'Return', receivePath = '' }) {
   const nav = useNavigate()
+  const allow = useCan()
   const docs = useCollection(collection)
   const contacts = useCollection('contacts').filter((c) => partyTypes.includes(c.type))
   const [f, setF] = useState({ from: '', to: '', type: '', memo: '', walkName: '', walkPhone: '', status: '', contactId: '' })
@@ -34,11 +40,7 @@ export default function InvoiceList({ title, collection, partyLabel = 'Customer'
   const columns = [
     { key: 'sl', label: 'SL', render: (_, i) => i + 1, sortable: false },
     ...(delivery ? [{
-      key: 'delivered', label: 'Delivery Confirm', render: (d) => (
-        <button onClick={() => db.update(collection, d.id, { delivered: !d.delivered })}>
-          {d.delivered ? <Badge>Delivered</Badge> : <Badge color="warning">Pending</Badge>}
-        </button>
-      ),
+      key: 'delivered', label: 'Delivery Confirm', sortable: false, render: (d) => <DeliveryButton doc={d} collection={collection} />,
     }] : []),
     { key: 'date', label: 'Date', render: (d) => displayDate(d.date) },
     { key: 'number', label: 'Invoice#' },
@@ -48,18 +50,25 @@ export default function InvoiceList({ title, collection, partyLabel = 'Customer'
       { key: 'paid', label: 'Given', align: 'right', render: (d) => money(d.paid) },
       { key: 'due', label: 'Due', align: 'right', render: (d) => money(d.due) },
     ]),
+    ...(receivePath ? [{
+      key: 'received', label: 'Status', render: (d) => (d.received ? <Badge>Received {d.receivedPurchaseNumber}</Badge> : <Badge color="warning">Ordered</Badge>),
+    }] : []),
     {
       key: 'action', label: 'Action', render: (d) => (
         <div className="flex gap-1">
-          <Button color="info" className="!px-2 !py-1" title="View" onClick={() => setView({ doc: d, challan })}><Eye size={14} /></Button>
-          <Button color="success" className="!px-2 !py-1" title={challan ? 'Print challan' : 'Print invoice'} onClick={() => setView({ doc: d, challan })}><Printer size={14} /></Button>
+          {returnPath
+            ? <Button color="info" className="!px-2 !py-1" title={returnLabel} onClick={() => nav(`${returnPath}?source=${d.id}`)}><Undo2 size={14} /> <span className="text-[12px]">{returnLabel}</span></Button>
+            : <Button color="info" className="!px-2 !py-1" title="View" onClick={() => setView({ doc: d, challan })}><Eye size={14} /></Button>}
+          {receivePath
+            ? <Button color="success" className="!px-2 !py-1" title={d.received ? `Already received as ${d.receivedPurchaseNumber}` : 'Order Receive'} disabled={!!d.received} onClick={() => nav(`${receivePath}?fromPO=${d.id}`)}><PackageCheck size={14} /> <span className="text-[12px]">Order Receive</span></Button>
+            : <Button color="success" className="!px-2 !py-1" title={challan ? 'Print challan' : 'Print invoice'} onClick={() => setView({ doc: d, challan })}><Printer size={14} /></Button>}
           {!challan && collection === 'sales' && (
             <Button color="warning" className="!px-2 !py-1" title="Print challan" onClick={() => setView({ doc: d, challan: true })}><Truck size={14} /></Button>
           )}
-          {editPath && (
-            <Button color="primary" className="!px-2 !py-1" title="Edit" onClick={() => nav(`${editPath}?edit=${d.id}`)}><Pencil size={14} /></Button>
+          {editPath && allow.edit && (
+            <Button color="primary" className="!px-2 !py-1" title="Edit" onClick={() => nav(`${typeof editPath === 'function' ? editPath(d) : editPath}?edit=${d.id}`)}><Pencil size={14} /></Button>
           )}
-          <Button color="danger" className="!px-2 !py-1" title="Delete" onClick={() => remove(d)}><Trash2 size={14} /></Button>
+          {allow.delete && <Button color="danger" className="!px-2 !py-1" title="Delete" onClick={() => remove(d)}><Trash2 size={14} /></Button>}
         </div>
       ),
     },
@@ -95,6 +104,7 @@ export default function InvoiceList({ title, collection, partyLabel = 'Customer'
               <td className="px-3 py-2 text-right">{money(totals.amt)}</td>
               <td className="px-3 py-2 text-right">{money(totals.paid)}</td>
               <td className="px-3 py-2 text-right">{money(totals.due)}</td>
+              {receivePath && <td />}
               <td />
             </tr>
           )}

@@ -6,7 +6,9 @@ import Combo from '../components/Combo'
 import InvoicePrint from '../components/InvoicePrint'
 import { toast } from '../components/Toast'
 import { ProductForm } from './Products'
+import { carryDeliveryTicks } from '../components/Delivery'
 import { db, useCollection, useDb, contactBalance } from '../store/db'
+import { useCan } from '../store/permissions'
 import { INVOICE_MODES, LABOR_PER_CARTOON, ROUND_TOTAL } from '../config/invoiceModes'
 import { PAYMENT_METHODS } from '../config/shop'
 import { num, round2, sftPerPiece, today, money } from '../utils/format'
@@ -51,14 +53,20 @@ function netPayments(rows, change) {
   return out.filter((p) => p.amount > 0)
 }
 
-// ?edit=<id> opens a saved invoice for editing; a new key resets the form
+// ?edit=<id> opens a saved invoice for editing; a new key resets the form.
+// ?fromPO=<id> (purchase only) starts a purchase filled from a purchase order.
 export default function InvoiceForm({ mode }) {
   const [params] = useSearchParams()
   const editId = params.get('edit') || ''
-  return <InvoiceEditor key={editId || 'new'} mode={mode} editId={editId} />
+  const poId = mode === 'purchase' && !editId ? params.get('fromPO') || '' : ''
+  const allow = useCan(INVOICE_MODES[mode].listPath)
+  if (editId && !allow.edit) {
+    return <div className="bg-white rounded shadow-sm p-6 text-[13px] text-gray-600">Your role is not allowed to edit this. Ask an admin to allow it on Set Permission.</div>
+  }
+  return <InvoiceEditor key={editId || poId || 'new'} mode={mode} editId={editId} poId={poId} />
 }
 
-function InvoiceEditor({ mode, editId }) {
+function InvoiceEditor({ mode, editId, poId }) {
   const cfg = INVOICE_MODES[mode]
   const nav = useNavigate()
   const state = useDb()
@@ -70,7 +78,14 @@ function InvoiceEditor({ mode, editId }) {
 
   // when editing, start from the saved invoice
   const [editDoc] = useState(() => (editId ? state[cfg.collection].find((d) => d.id === editId) || null : null))
-  const e0 = editDoc || {}
+  // Order Receive: copy the P/O's supplier, lines and totals; payments start empty
+  const [poDoc] = useState(() => (poId ? state.purchaseOrders.find((d) => d.id === poId) || null : null))
+  const fromPO = poDoc ? {
+    contactId: poDoc.contactId, contactName: poDoc.contactName, phone: poDoc.phone, address: poDoc.address,
+    items: poDoc.items, vatType: poDoc.vatType, vatInput: poDoc.vatInput, discType: poDoc.discType, discInput: poDoc.discInput,
+    discountNote: poDoc.discountNote, note: poDoc.note ? `${poDoc.number}: ${poDoc.note}` : `From ${poDoc.number}`,
+  } : null
+  const e0 = editDoc || fromPO || {}
   const startPays = e0.givenPayments?.length ? e0.givenPayments : e0.payments?.length ? e0.payments : [emptyPay()]
 
   const [contactId, setContactId] = useState(e0.contactId || '')
@@ -78,7 +93,6 @@ function InvoiceEditor({ mode, editId }) {
   const [refId, setRefId] = useState(e0.referenceId || '')
   const [date, setDate] = useState(e0.date || today())
   const [note, setNote] = useState(e0.note || '')
-  const [sourceId, setSourceId] = useState(e0.sourceId || '')
   const [lines, setLines] = useState(() => (e0.items?.length ? e0.items.map((it) => ({ ...emptyLine(), ...it, key: Math.random() })) : [emptyLine()]))
   const [vatType, setVatType] = useState(e0.vatType || (editDoc ? 'BDT' : '%'))
   const [vat, setVat] = useState(e0.vatInput ?? (editDoc ? e0.vat || '' : ''))
@@ -175,18 +189,8 @@ function InvoiceEditor({ mode, editId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lines, vat, vatType, disc, discType, labor, autoLabor, pays, given, prevDue, products])
 
-  // Returns: pick an earlier invoice to copy its lines
-  const sourceDocs = cfg.source ? state[cfg.source].filter((d) => !contactId || d.contactId === contactId) : []
-  const loadSource = (id) => {
-    setSourceId(id)
-    const doc = state[cfg.source].find((d) => d.id === id)
-    if (!doc) return
-    setContactId(doc.contactId || '')
-    setLines(doc.items.map((it) => recalc({ ...emptyLine(), ...it }, productById(it.productId), 'qty')))
-  }
-
   const reset = () => {
-    setContactId(''); setWalk({ name: '', address: '', phone: '' }); setRefId(''); setNote(''); setSourceId('')
+    setContactId(''); setWalk({ name: '', address: '', phone: '' }); setRefId(''); setNote('')
     setLines([emptyLine()]); setVat(''); setDisc(0); setDiscNote(''); setLabor(''); setGiven(0); setPays([emptyPay()]); setError(''); setSms(false)
   }
 
@@ -197,33 +201,38 @@ function InvoiceEditor({ mode, editId }) {
     if (cfg.payments && totals.rowsTotal !== totals.given) {
       setError(`The Paid amounts add up to ${money(totals.rowsTotal)} but Given is ${money(totals.given)}. They must be the same.`); return
     }
+    if (poDoc?.received && state.purchases.some((x) => x.id === poDoc.receivedPurchaseId)) {
+      setError(`${poDoc.number} was already received as ${poDoc.receivedPurchaseNumber}.`); return
+    }
     if (saving) return
     setSaving(true)
     setError('')
     const enteredPays = cfg.payments ? pays.filter((p) => num(p.amount) > 0).map((p) => ({ ...p, amount: num(p.amount) })) : []
+    const savedItems = items.map(({ key, ...l }) => {
+      const p = productById(l.productId) || {}
+      return { ...l, name: p.name, code: p.code, size: p.size, grade: p.grade, kind: p.kind, qty: num(l.qty), rate: num(l.rate) }
+    })
     const body = {
-      date, note, sourceId,
+      date, note,
+      ...(poDoc ? { purchaseOrderId: poDoc.id } : {}),
       contactId: contactId || '',
       contactName: contact ? contact.name : walk.name || cfg.walkIn || '',
       phone: contact ? contact.phone : walk.phone,
       address: contact ? contact.address : walk.address,
       referenceId: refId,
-      items: items.map(({ key, ...l }) => {
-        const p = productById(l.productId) || {}
-        return { ...l, name: p.name, code: p.code, size: p.size, grade: p.grade, kind: p.kind, qty: num(l.qty), rate: num(l.rate) }
-      }),
+      items: savedItems,
       subTotal: totals.subTotal, vat: totals.vatAmt, discount: totals.discAmt, discountNote: discNote.trim(),
       vatType, vatInput: vat, discType, discInput: disc, autoLabor,
       laborCost: totals.laborAmt, invoiceAmount: totals.invoiceAmount, previousDue: prevDue,
       payments: netPayments(enteredPays, totals.change), givenPayments: enteredPays,
       paid: totals.paid, due: totals.due, given: totals.given, change: totals.change, sms,
-      delivered: editDoc ? !!editDoc.delivered : false,
+      ...(mode === 'sale' ? carryDeliveryTicks(editDoc, savedItems) : {}),
     }
     const doc = editDoc ? await db.updateDocument(cfg.collection, editDoc.id, body) : await db.saveDocument(cfg.collection, body)
     setSaving(false)
     if (!doc) return // error already shown
     toast.success(`${cfg.title} ${doc.number} ${editDoc ? 'updated' : 'saved'} successfully.`)
-    if (editDoc) {
+    if (editDoc || poDoc) {
       if (print) setPrintDoc({ ...doc, title: cfg.title, afterClose: cfg.listPath })
       else nav(cfg.listPath)
       return
@@ -254,12 +263,6 @@ function InvoiceEditor({ mode, editId }) {
             <>
               <span className="font-medium">Ref.</span>
               <Combo value={refId} onChange={setRefId} placeholder="Select Reference" options={[{ value: '', label: 'Select Reference' }, ...references.map((r) => ({ value: r.id, label: r.name }))]} />
-            </>
-          ) : cfg.source ? (
-            <>
-              <span className="font-medium">Invoice</span>
-              <Select value={sourceId} onChange={(e) => loadSource(e.target.value)} placeholder="--Load from invoice--"
-                options={sourceDocs.map((d) => ({ value: d.id, label: `${d.number} (${d.contactName})` }))} />
             </>
           ) : cfg.party ? (
             <>
@@ -293,6 +296,8 @@ function InvoiceEditor({ mode, editId }) {
             <Button color="success" onClick={() => setLines((ls) => [...ls, emptyLine()])} className="!px-6"><Plus size={16} /></Button>
             <Button onClick={() => setAddProduct(true)} title="Create a new product">Add Product</Button>
             {editDoc && <span className="self-center ml-auto font-medium text-warning">Editing {editDoc.number}</span>}
+            {poDoc && <span className="self-center ml-auto font-medium text-info">Receiving purchase order {poDoc.number} — change the items if needed, then save</span>}
+            {poId && !poDoc && <span className="self-center ml-auto font-medium text-danger">Purchase order not found</span>}
           </div>
         </div>
 

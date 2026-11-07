@@ -81,6 +81,7 @@ Deleting the `data` folder starts over with fresh sample data.
 
 - Invoice totals are calculated in the browser and saved as sent. The server checks the products and
   quantities but does not recalculate prices.
-- The per-menu checkboxes on Set Permission are saved, but only the admin-only rules above are enforced.
+- Edit / Delete ticks on Set Permission are enforced per role (buttons are hidden and the server refuses the change).
+  The per-menu access ticks are saved but do not hide menus yet.
 - SMS messages are recorded but not sent; connect an SMS gateway in the server to deliver them.
 - Use HTTPS (for example behind a reverse proxy) if the app will be reachable from the internet.

@@ -85,6 +85,7 @@ export const db = {
     const res = await api(`/documents/${name}`, { method: 'POST', body: doc })
     set(name, [...state[name], res.doc])
     merge('products', res.products)
+    merge('purchaseOrders', res.purchaseOrders || [])
     return res.doc
   }),
 
@@ -100,6 +101,7 @@ export const db = {
     const res = await api(`/documents/${name}/${id}`, { method: 'DELETE' })
     set(name, state[name].filter((r) => r.id !== id))
     merge('products', res.products)
+    merge('purchaseOrders', res.purchaseOrders || [])
     return true
   }),
 
@@ -123,7 +125,8 @@ export function contactBalance(contact, s = state) {
   const docs = isSupplier ? s.purchases : s.sales
   const returns = isSupplier ? s.purchaseReturns : s.salesReturns
   const invoiced = docs.filter((x) => x.contactId === contact.id).reduce((a, x) => a + (x.due || 0), 0)
-  const returned = returns.filter((x) => x.contactId === contact.id).reduce((a, x) => a + (x.invoiceAmount || 0), 0)
+  // a return credits its amount, minus any cash paid back on the spot
+  const returned = returns.filter((x) => x.contactId === contact.id).reduce((a, x) => a + (x.invoiceAmount || 0) - (x.paid || 0), 0)
   const payType = isSupplier ? 'pay' : 'receive'
   const paid = s.payments.filter((p) => p.contactId === contact.id && p.type === payType).reduce((a, p) => a + Number(p.amount || 0), 0)
   const settled = s.settlements.filter((p) => p.contactId === contact.id).reduce((a, p) => a + Number(p.amount || 0), 0)
