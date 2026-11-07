@@ -305,7 +305,10 @@ function ContactLedger({ contact }) {
       e.push({ date: d.date, desc: `${sup ? 'Purchase' : 'Sale'} ${d.number}`, debit: d.invoiceAmount, credit: 0 })
       if (d.paid) e.push({ date: d.date, desc: `Paid on ${d.number}`, debit: 0, credit: d.paid })
     })
-    ;(sup ? s.purchaseReturns : s.salesReturns).filter((d) => d.contactId === contact.id).forEach((d) => e.push({ date: d.date, desc: `Return ${d.number}`, debit: 0, credit: d.invoiceAmount }))
+    ;(sup ? s.purchaseReturns : s.salesReturns).filter((d) => d.contactId === contact.id).forEach((d) => {
+      e.push({ date: d.date, desc: `Return ${d.number}`, debit: 0, credit: d.invoiceAmount })
+      if (d.paid) e.push({ date: d.date, desc: `Return paid on ${d.number}`, debit: d.paid, credit: 0 })
+    })
     s.payments.filter((p) => p.contactId === contact.id).forEach((p) => e.push({ date: p.date, desc: `Payment ${p.number || ''}`, debit: 0, credit: p.amount }))
     s.settlements.filter((p) => p.contactId === contact.id).forEach((p) => e.push({ date: p.date, desc: 'Settlement', debit: 0, credit: p.amount }))
     e.sort((a, b) => a.date.localeCompare(b.date))

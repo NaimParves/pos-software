@@ -66,6 +66,15 @@ function adjustStock(items, sign) {
   return [...touched.values()].map((p) => update('products', p.id, { stock: p.stock }))
 }
 
+// A purchase made from a P/O ("Order Receive") marks that P/O as received
+function linkPurchaseOrder(purchase, receivedId) {
+  if (!purchase.purchaseOrderId || !get('purchaseOrders', purchase.purchaseOrderId)) return []
+  const patch = receivedId
+    ? { received: true, receivedPurchaseId: receivedId, receivedPurchaseNumber: purchase.number }
+    : { received: false, receivedPurchaseId: '', receivedPurchaseNumber: '' }
+  return [update('purchaseOrders', purchase.purchaseOrderId, patch)]
+}
+
 function checkItems(items) {
   if (!items.length) throw fail(400, 'Add at least one product')
   for (const it of items) {
@@ -103,25 +112,31 @@ function handle(method, path, body, query) {
     if (method === 'POST' && !id) {
       const doc = sanitize(body)
       checkItems(Array.isArray(doc.items) ? doc.items : [])
+      if (col !== 'purchases') delete doc.purchaseOrderId
+      if (doc.purchaseOrderId) {
+        const po = get('purchaseOrders', doc.purchaseOrderId)
+        if (!po) throw fail(400, 'That purchase order no longer exists')
+        if (po.receivedPurchaseId && get('purchases', po.receivedPurchaseId)) throw fail(400, `${po.number} was already received as ${po.receivedPurchaseNumber}`)
+      }
       const rec = insert(col, { ...doc, number: nextNumber(cfg.prefix), createdBy: 'Admin' })
-      return { doc: rec, products: cfg.stock ? adjustStock(rec.items, cfg.stock) : [] }
+      return { doc: rec, products: cfg.stock ? adjustStock(rec.items, cfg.stock) : [], purchaseOrders: linkPurchaseOrder(rec, rec.id) }
     }
     const old = get(col, id)
     if (!old) throw fail(404, 'Not found')
     if (method === 'PUT') {
-      const { number, createdBy, ...doc } = sanitize(body)
+      const { number, createdBy, purchaseOrderId, ...doc } = sanitize(body)
       checkItems(Array.isArray(doc.items) ? doc.items : [])
       const touched = new Map()
       if (cfg.stock) {
         adjustStock(old.items || [], -cfg.stock).forEach((p) => touched.set(p.id, p))
         adjustStock(doc.items, cfg.stock).forEach((p) => touched.set(p.id, p))
       }
-      const rec = update(col, id, { ...doc, number: old.number, createdBy: old.createdBy, updatedBy: 'Admin', updatedAt: new Date().toISOString() })
+      const rec = update(col, id, { ...doc, number: old.number, createdBy: old.createdBy, purchaseOrderId: old.purchaseOrderId || '', updatedBy: 'Admin', updatedAt: new Date().toISOString() })
       return { doc: rec, products: [...touched.values()] }
     }
     if (method === 'DELETE') {
       db.data[col] = all(col).filter((r) => r.id !== id)
-      return { ok: true, products: cfg.stock ? adjustStock(old.items, -cfg.stock) : [] }
+      return { ok: true, products: cfg.stock ? adjustStock(old.items, -cfg.stock) : [], purchaseOrders: col === 'purchases' ? linkPurchaseOrder(old, null) : [] }
     }
   }
 

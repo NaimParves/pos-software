@@ -7,6 +7,8 @@ import DataTable from '../components/DataTable'
 import { db, useDb, contactBalance } from '../store/db'
 import { SHOP } from '../config/shop'
 import { MENU } from '../config/menu'
+import { ACTION_PAGES, PERMISSION_ROLES, can, permissionKey } from '../config/permissions'
+import { useCan } from '../store/permissions'
 import { money, round2, today, displayDate } from '../utils/format'
 
 // Simple Code-39 style barcode drawn as SVG bars (visual only)
@@ -65,7 +67,9 @@ export function BarcodePrint() {
 export function OpeningStock() {
   const s = useDb()
   const [qty, setQty] = useState({})
+  const allow = useCan()
   const save = async () => {
+    if (!allow.edit) { alert('Your role is not allowed to change stock here.'); return }
     const changes = Object.entries(qty).filter(([, v]) => v !== '')
     const results = await Promise.all(changes.map(([id, v]) => db.update('products', id, { stock: Number(v) })))
     setQty({})
@@ -80,7 +84,9 @@ export function OpeningStock() {
           { key: 'stock', label: 'Current Stock', align: 'right', render: (p) => round2(p.stock) },
           { key: 'new', label: 'Opening Stock', sortable: false, render: (p) => <Input type="number" className="!w-32" value={qty[p.id] ?? ''} onChange={(e) => setQty({ ...qty, [p.id]: e.target.value })} /> },
         ]} />
-        <Button className="mt-4" onClick={save}>Save Opening Stock</Button>
+        {allow.edit
+          ? <Button className="mt-4" onClick={save}>Save Opening Stock</Button>
+          : <p className="text-[13px] text-gray-500 mt-4">Your role is not allowed to change stock here.</p>}
       </Card>
     </>
   )
@@ -143,20 +149,72 @@ export function SendMessage({ dueOnly }) {
 
 export function SetPermission() {
   const s = useDb()
-  const roles = ['Admin', 'Manager', 'Salesman']
   const [role, setRole] = useState('Manager')
   const perms = s.permissions?.[0]?.map || {}
   const key = (label) => `${role}:${label}`
-  const toggle = (label) => {
-    const next = { ...perms, [key(label)]: !perms[key(label)] }
+  const saveMap = (next) => {
     if (s.permissions?.[0]) db.update('permissions', s.permissions[0].id, { map: next })
     else db.insert('permissions', { map: next })
   }
+  const toggle = (label) => saveMap({ ...perms, [key(label)]: !perms[key(label)] })
+
+  // Edit / Delete per page
+  const allowed = (action, path) => can(perms, role, action, path)
+  const usable = (action, p) => !(action === 'edit' ? p.noEdit : p.noDelete)
+  const setAction = (action, path, value) => saveMap({ ...perms, [permissionKey(role, action, path)]: value })
+  const setAll = (action, value) => saveMap({
+    ...perms,
+    ...Object.fromEntries(ACTION_PAGES.filter((p) => usable(action, p)).map((p) => [permissionKey(role, action, p.path), value])),
+  })
+  const allOn = (action) => ACTION_PAGES.filter((p) => usable(action, p)).every((p) => allowed(action, p.path))
+  const groups = [...new Set(ACTION_PAGES.map((p) => p.group))]
+
   return (
     <>
       <PageHeader title="Set Permission" />
       <Card>
-        <Field label="Role" className="max-w-xs mb-5"><Select value={role} onChange={(e) => setRole(e.target.value)} options={roles} /></Field>
+        <Field label="Role" className="max-w-xs mb-5"><Select value={role} onChange={(e) => setRole(e.target.value)} options={PERMISSION_ROLES} /></Field>
+
+        <h5 className="text-[14px] font-semibold text-gray-700 mb-1">Edit &amp; Delete</h5>
+        <p className="text-[12px] text-gray-500 mb-3">
+          Tick what the <b>{role}</b> role may edit or delete. Unticked buttons are hidden, and the server refuses the change.
+          Super Admin can always edit and delete.
+        </p>
+        <div className="overflow-x-auto mb-8">
+          <table className="w-full min-w-[480px] text-[13px] border">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left px-3 py-2">Menu / Page</th>
+                {['edit', 'delete'].map((a) => (
+                  <th key={a} className="px-3 py-2 w-28">
+                    <label className="inline-flex items-center gap-2 capitalize">
+                      <input type="checkbox" checked={allOn(a)} onChange={(e) => setAll(a, e.target.checked)} /> {a}
+                    </label>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => [
+                <tr key={g} className="bg-[#f2f2f5]"><td colSpan={3} className="px-3 py-1.5 font-semibold">{g}</td></tr>,
+                ...ACTION_PAGES.filter((p) => p.group === g).map((p) => (
+                  <tr key={p.path} className="border-t">
+                    <td className="px-3 py-1.5 pl-6 text-gray-600">{p.label}</td>
+                    {['edit', 'delete'].map((a) => (
+                      <td key={a} className="px-3 py-1.5 text-center">
+                        {usable(a, p)
+                          ? <input type="checkbox" aria-label={`${a} ${p.label}`} checked={allowed(a, p.path)} onChange={(e) => setAction(a, p.path, e.target.checked)} />
+                          : <span className="text-gray-300">–</span>}
+                      </td>
+                    ))}
+                  </tr>
+                )),
+              ])}
+            </tbody>
+          </table>
+        </div>
+
+        <h5 className="text-[14px] font-semibold text-gray-700 mb-3">Menu access</h5>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 text-[13px]">
           {MENU.map((m) => (
             <div key={m.label} className="border rounded p-3">
@@ -171,7 +229,7 @@ export function SetPermission() {
             </div>
           ))}
         </div>
-        <p className="text-[12px] text-gray-500 mt-4">Permissions are saved, but they take effect only once real user accounts are connected through a backend.</p>
+        <p className="text-[12px] text-gray-500 mt-4">Menu access ticks are saved but do not hide menus yet. Edit &amp; Delete ticks above take effect right away.</p>
       </Card>
     </>
   )

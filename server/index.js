@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { store, tx, COLLECTIONS, DOCUMENTS, ensureSeeded, loadSeed, DATA_DIR } from './db.js'
 import { makeAuth, hashPassword, verifyPassword, ADMIN_ROLES } from './auth.js'
+import { canChangeRecord, DELIVERY_FIELDS } from '../src/config/permissions.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.API_PORT) || 3001
@@ -39,6 +40,24 @@ const guardAdmin = (req, res, next) =>
   ADMIN_COLLECTIONS.includes(req.params.col) && !ADMIN_ROLES.includes(req.user.role)
     ? res.status(403).json({ error: 'Only an admin can do this' })
     : next()
+
+// Edit / Delete rights per role (Basic Settings > Security System > Set Permission)
+function allowed(req, action, col, record) {
+  const map = store.all('permissions')[0]?.map
+  return canChangeRecord(map, req.user.role, action, col, record)
+}
+const denied = (res, action) => res.status(403).json({ error: `Your role is not allowed to ${action} this` })
+
+// A purchase made from a P/O ("Order Receive") marks that P/O as received
+function linkPurchaseOrder(purchase, receivedId) {
+  if (!purchase.purchaseOrderId) return []
+  const po = store.get('purchaseOrders', purchase.purchaseOrderId)
+  if (!po) return []
+  const patch = receivedId
+    ? { received: true, receivedPurchaseId: receivedId, receivedPurchaseNumber: purchase.number }
+    : { received: false, receivedPurchaseId: '', receivedPurchaseNumber: '' }
+  return [store.update('purchaseOrders', po.id, patch)]
+}
 
 // Strip fields the client may not set directly
 function sanitize(col, body) {
@@ -97,12 +116,20 @@ app.post('/api/documents/:col', requireAuth, (req, res) => {
     if (!store.get('products', it.productId)) return res.status(400).json({ error: `Product not found: ${it.name || it.productId}` })
     if (!(Number(it.qty) > 0)) return res.status(400).json({ error: `Quantity must be more than 0 for ${it.name}` })
   }
+  if (req.params.col !== 'purchases') delete body.purchaseOrderId
+  if (body.purchaseOrderId) {
+    const po = store.get('purchaseOrders', body.purchaseOrderId)
+    if (!po) return res.status(400).json({ error: 'That purchase order no longer exists' })
+    if (po.receivedPurchaseId && store.get('purchases', po.receivedPurchaseId)) {
+      return res.status(400).json({ error: `${po.number} was already received as ${po.receivedPurchaseNumber}` })
+    }
+  }
   const result = tx(() => {
     const doc = store.insert(req.params.col, {
       ...body, number: store.nextNumber(cfg.prefix), createdBy: req.user.name,
     })
     const products = cfg.stock ? adjustStock(items, cfg.stock) : []
-    return { doc, products }
+    return { doc, products, purchaseOrders: linkPurchaseOrder(doc, doc.id) }
   })
   res.status(201).json(result)
 })
@@ -114,7 +141,8 @@ app.put('/api/documents/:col/:id', requireAuth, (req, res) => {
   if (!cfg) return res.status(404).json({ error: 'Unknown document type' })
   const old = store.get(req.params.col, req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
-  const { number, createdBy, ...body } = sanitize(req.params.col, req.body)
+  if (!allowed(req, 'edit', req.params.col, old)) return denied(res, 'edit')
+  const { number, createdBy, purchaseOrderId, ...body } = sanitize(req.params.col, req.body)
   const items = Array.isArray(body.items) ? body.items : []
   if (!items.length) return res.status(400).json({ error: 'Add at least one product' })
   for (const it of items) {
@@ -128,7 +156,8 @@ app.put('/api/documents/:col/:id', requireAuth, (req, res) => {
       adjustStock(items, cfg.stock).forEach((p) => touched.set(p.id, p))
     }
     const doc = store.update(req.params.col, old.id, {
-      ...body, number: old.number, createdBy: old.createdBy, updatedBy: req.user.name, updatedAt: new Date().toISOString(),
+      ...body, number: old.number, createdBy: old.createdBy, purchaseOrderId: old.purchaseOrderId || '',
+      updatedBy: req.user.name, updatedAt: new Date().toISOString(),
     })
     return { doc, products: [...touched.values()] }
   })
@@ -140,10 +169,12 @@ app.delete('/api/documents/:col/:id', requireAuth, (req, res) => {
   if (!cfg) return res.status(404).json({ error: 'Unknown document type' })
   const doc = store.get(req.params.col, req.params.id)
   if (!doc) return res.status(404).json({ error: 'Not found' })
+  if (!allowed(req, 'delete', req.params.col, doc)) return denied(res, 'delete')
   const result = tx(() => {
     store.remove(req.params.col, doc.id)
     const products = cfg.stock ? adjustStock(doc.items, -cfg.stock) : []
-    return { ok: true, products }
+    const purchaseOrders = req.params.col === 'purchases' ? linkPurchaseOrder(doc, null) : []
+    return { ok: true, products, purchaseOrders }
   })
   res.json(result)
 })
@@ -178,6 +209,10 @@ app.post('/api/:col', requireAuth, checkCollection, guardAdmin, (req, res) => {
 app.patch('/api/:col/:id', requireAuth, checkCollection, guardAdmin, (req, res) => {
   const col = req.params.col
   if (DOCUMENTS[col] && req.body?.items) return res.status(400).json({ error: 'Invoice lines cannot be edited; delete and re-enter the invoice' })
+  const current = store.get(col, req.params.id)
+  if (!current) return res.status(404).json({ error: 'Not found' })
+  const deliveryOnly = col === 'sales' && Object.keys(req.body || {}).every((k) => DELIVERY_FIELDS.includes(k))
+  if (!deliveryOnly && !allowed(req, 'edit', col, current)) return denied(res, 'edit')
   const rec = store.update(col, req.params.id, sanitize(col, { ...req.body, id: req.params.id }))
   if (!rec) return res.status(404).json({ error: 'Not found' })
   res.json(clean(col, rec))
@@ -187,6 +222,8 @@ app.delete('/api/:col/:id', requireAuth, checkCollection, guardAdmin, (req, res)
   const col = req.params.col
   if (DOCUMENTS[col]) return res.status(400).json({ error: 'Use /api/documents to delete invoices' })
   if (col === 'users' && req.params.id === req.user.id) return res.status(400).json({ error: 'You cannot delete your own account' })
+  const current = store.get(col, req.params.id)
+  if (current && !allowed(req, 'delete', col, current)) return denied(res, 'delete')
   if (!store.remove(col, req.params.id)) return res.status(404).json({ error: 'Not found' })
   res.json({ ok: true })
 })

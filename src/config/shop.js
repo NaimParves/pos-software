@@ -1,5 +1,5 @@
 // public/ files, also when the app is served from a sub-folder (GitHub Pages)
-const asset = (f) => `${import.meta.env.BASE_URL}${f}`
+const asset = (f) => `${import.meta.env?.BASE_URL ?? "/"}${f}` // import.meta.env is undefined when the server imports this
 
 // Business details shown on the login screen, reports and printed invoices.
 export const SHOP = {

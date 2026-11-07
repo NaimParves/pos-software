@@ -1,4 +1,4 @@
-import { PAYMENT_METHODS } from './shop'
+import { PAYMENT_METHODS } from './shop.js'
 
 const status = { key: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive'], default: 'Active', placeholder: undefined }
 const master = (title, collection, extra = []) => ({

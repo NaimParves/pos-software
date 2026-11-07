@@ -5,6 +5,7 @@ import Combo from '../components/Combo'
 import DataTable from '../components/DataTable'
 import { toast } from '../components/Toast'
 import { db, useCollection } from '../store/db'
+import { useCan } from '../store/permissions'
 import { money, round2 } from '../utils/format'
 
 const blank = {
@@ -17,6 +18,7 @@ export default function Products() {
   const [editing, setEditing] = useState(null) // product being edited, or null for a new one
   const [formKey, setFormKey] = useState(0)
   const [menu, setMenu] = useState(null)
+  const allow = useCan()
 
   const done = () => { setEditing(null); setFormKey((k) => k + 1) }
   const edit = (p) => { setEditing(p); setFormKey((k) => k + 1); setMenu(null); window.scrollTo({ top: 0, behavior: 'smooth' }) }
@@ -34,22 +36,24 @@ export default function Products() {
     { key: 'sellPrice', label: 'S/Price' },
     { key: 'stock', label: 'Stock', render: (p) => round2(p.stock) },
     { key: 'status', label: 'Status', render: (p) => <Badge color={p.status === 'Active' ? 'success' : 'danger'}>{p.status}</Badge> },
-    {
+    ...(!allow.edit && !allow.delete ? [] : [{
       key: 'action', label: 'Action', render: (p) => (
         <div className="relative">
           <button onClick={() => setMenu(menu === p.id ? null : p.id)} className="px-2 text-gray-600"><MoreHorizontal size={16} /></button>
           {menu === p.id && (
             <div className="absolute right-0 z-20 bg-white border rounded shadow w-28 text-[13px]" onMouseLeave={() => setMenu(null)}>
-              <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50" onClick={() => edit(p)}>Edit</button>
-              <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50" onClick={() => { db.update('products', p.id, { status: p.status === 'Active' ? 'Inactive' : 'Active' }); setMenu(null) }}>
-                {p.status === 'Active' ? 'Deactivate' : 'Activate'}
-              </button>
-              <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50 text-danger" onClick={() => { if (confirm('Delete this product?')) db.remove('products', p.id); setMenu(null) }}>Delete</button>
+              {allow.edit && <>
+                <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50" onClick={() => edit(p)}>Edit</button>
+                <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50" onClick={() => { db.update('products', p.id, { status: p.status === 'Active' ? 'Inactive' : 'Active' }); setMenu(null) }}>
+                  {p.status === 'Active' ? 'Deactivate' : 'Activate'}
+                </button>
+              </>}
+              {allow.delete && <button className="block w-full text-left px-3 py-1.5 hover:bg-gray-50 text-danger" onClick={() => { if (confirm('Delete this product?')) db.remove('products', p.id); setMenu(null) }}>Delete</button>}
             </div>
           )}
         </div>
       ),
-    },
+    }]),
   ]
 
   return (

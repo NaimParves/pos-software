@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import InvoiceForm from './pages/InvoiceForm'
 import InvoiceList from './pages/InvoiceList'
+import ReturnForm from './pages/ReturnForm'
 import Products from './pages/Products'
 import Contacts from './pages/Contacts'
 import CrudPage from './pages/CrudPage'
@@ -56,18 +57,18 @@ export default function App() {
 
         {/* Sales */}
         {page('/invoices', <InvoiceForm mode="sale" />)}
-        {page('/invoices/all-sales', <InvoiceList title="All Sales" collection="sales" stockSign={-1} delivery editPath="/invoices" />)}
+        {page('/invoices/all-sales', <InvoiceList title="All Sales" collection="sales" stockSign={-1} delivery editPath="/invoices" returnPath="/salesreturn" returnLabel="Sales Return" />)}
         {page('/invoices/all-challan-list', <InvoiceList title="List of Challans" collection="sales" challan delivery />)}
-        {page('/salesreturn', <InvoiceForm mode="salesReturn" />)}
-        {page('/salesreturn/direct-return/create', <InvoiceForm mode="directReturn" />)}
-        {page('/salesreturn/direct-return', <InvoiceList title="List of Return" collection="salesReturns" stockSign={1} editPath="/salesreturn/direct-return/create" />)}
+        {page('/salesreturn', <ReturnForm mode="salesReturn" />)}
+        {page('/salesreturn/direct-return/create', <ReturnForm mode="directReturn" />)}
+        {page('/salesreturn/direct-return', <InvoiceList title="List of Return" collection="salesReturns" stockSign={1} editPath={(d) => (d.sourceId ? '/salesreturn' : '/salesreturn/direct-return/create')} />)}
 
         {/* Purchase */}
         {page('/bills', <InvoiceForm mode="purchase" />)}
-        {page('/bills/all-bills', <InvoiceList title="All Purchase" collection="purchases" partyLabel="Supplier" partyTypes={['supplier']} stockSign={1} editPath="/bills" />)}
-        {page('/purchasereturn', <InvoiceForm mode="purchaseReturn" />)}
+        {page('/bills/all-bills', <InvoiceList title="All Purchase" collection="purchases" partyLabel="Supplier" partyTypes={['supplier']} stockSign={1} editPath="/bills" returnPath="/purchasereturn" returnLabel="Purchase Return" />)}
+        {page('/purchasereturn', <ReturnForm mode="purchaseReturn" />)}
         {page('/purchaseorders', <InvoiceForm mode="purchaseOrder" />)}
-        {page('/purchaseorders/all-purchase-orders', <InvoiceList title="List of P/O" collection="purchaseOrders" partyLabel="Supplier" partyTypes={['supplier']} editPath="/purchaseorders" />)}
+        {page('/purchaseorders/all-purchase-orders', <InvoiceList title="List of P/O" collection="purchaseOrders" partyLabel="Supplier" partyTypes={['supplier']} editPath="/purchaseorders" receivePath="/bills" />)}
 
         {/* Damages */}
         {page('/damages', <InvoiceList title="All Damages" collection="damages" partyLabel="Note" partyTypes={[]} stockSign={-1} editPath="/damages/create" />)}
