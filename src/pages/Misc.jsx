@@ -92,57 +92,168 @@ export function OpeningStock() {
   )
 }
 
-export function SendMessage({ dueOnly }) {
-  const s = useDb()
-  const recipients = s.contacts
-    .filter((c) => c.phone && ['customer', 'retailer', 'supplier', 'employee'].includes(c.type))
-    .map((c) => ({ ...c, balance: contactBalance(c, s) }))
-    .filter((c) => !dueOnly || (c.type !== 'supplier' && c.balance > 0))
-  const [picked, setPicked] = useState({})
-  const [body, setBody] = useState(dueOnly ? `Dear customer, your due amount is {due} ${SHOP.currency}. Please pay soon. - ${SHOP.name}` : '')
-  const send = () => {
-    const to = recipients.filter((r) => picked[r.id])
-    if (!to.length || !body.trim()) { alert('Pick at least one recipient and write a message.'); return }
-    to.forEach((r) => db.insert('sentMessages', { date: today(), phone: r.phone, name: r.name, body: body.replace('{due}', money(r.balance)) }))
-    setPicked({})
-    alert(`${to.length} message(s) queued. Connect an SMS gateway in the backend to deliver them.`)
+// Messaging. Messages are recorded in Sent Messages; connect an SMS gateway in
+// the server to actually deliver them. {name} and {due} are filled per person.
+const CATEGORIES = [
+  { value: 'customer', label: 'Customer' },
+  { value: 'retailer', label: 'Retailer' },
+  { value: 'supplier', label: 'Supplier' },
+  { value: 'employee', label: 'Employee' },
+  { value: 'phoneBook', label: 'Phone Book' },
+  { value: 'due', label: 'Due Customer' },
+]
+const SMS_TYPES = ['Non Masking', 'Masking', 'Voice']
+const fill = (body, r) => body.replaceAll('{name}', r.name || '').replaceAll('{due}', money(r.balance || 0))
+
+function queue(list, body, smsType) {
+  if (!list.length || !body.trim()) { alert('Tick at least one person and write a message.'); return false }
+  list.forEach((r) => db.insert('sentMessages', { date: today(), phone: r.phone, name: r.name, body: fill(body, r), smsType }))
+  alert(`${list.length} message(s) queued. Connect an SMS gateway in the backend to deliver them.`)
+  return true
+}
+
+function recipientsOf(s, category) {
+  if (category === 'phoneBook') return s.phoneBook.filter((p) => p.phone).map((p) => ({ id: p.id, name: p.name, phone: p.phone, address: p.group || '' }))
+  if (category === 'due') {
+    return s.contacts
+      .filter((c) => c.phone && ['customer', 'retailer'].includes(c.type))
+      .map((c) => ({ ...c, balance: contactBalance(c, s) }))
+      .filter((c) => c.balance > 0)
   }
+  return s.contacts.filter((c) => c.phone && c.type === category).map((c) => ({ ...c, balance: contactBalance(c, s) }))
+}
+
+function SmsTypePicker({ value, onChange }) {
+  return (
+    <div className="flex flex-wrap items-center gap-4 text-[13px]">
+      <span className="font-semibold">Send SMS</span>
+      {SMS_TYPES.map((t) => (
+        <label key={t} className="flex items-center gap-1.5"><input type="checkbox" checked={value === t} onChange={() => onChange(t)} /> {t}</label>
+      ))}
+    </div>
+  )
+}
+
+function SentMessages() {
+  const s = useDb()
+  return (
+    <Card title="Sent Messages">
+      <DataTable rows={s.sentMessages.slice().reverse()} columns={[
+        { key: 'date', label: 'Date', render: (r) => displayDate(r.date) }, { key: 'name', label: 'Name' }, { key: 'phone', label: 'Phone' },
+        { key: 'smsType', label: 'Type' }, { key: 'body', label: 'Message' },
+      ]} />
+    </Card>
+  )
+}
+
+export function SendMessage() {
+  const s = useDb()
+  const [category, setCategory] = useState('')
+  const [template, setTemplate] = useState('')
+  const [body, setBody] = useState('')
+  const [smsType, setSmsType] = useState('Non Masking')
+  const [picked, setPicked] = useState({})
+  const list = category ? recipientsOf(s, category) : []
+  const allTicked = list.length > 0 && list.every((r) => picked[r.id])
+  const send = () => { if (queue(list.filter((r) => picked[r.id]), body, smsType)) setPicked({}) }
   return (
     <>
-      <PageHeader title={dueOnly ? 'Due Customer' : 'Send Message'} />
+      <PageHeader title="Send Message" />
       <Card>
-        <div className="grid lg:grid-cols-2 gap-5">
-          <div>
-            <Field label="Template">
-              <Select placeholder="--Select Template--" options={s.messages.map((m) => ({ value: m.body, label: m.title }))} onChange={(e) => e.target.value && setBody(e.target.value)} />
+        <div className="grid md:grid-cols-2 gap-5">
+          <div className="space-y-3">
+            <Field label="SMS Type *">
+              <Select value={template} placeholder="--Select SMS Type--" options={s.messages.map((m) => ({ value: m.id, label: m.title }))}
+                onChange={(e) => { setTemplate(e.target.value); const m = s.messages.find((x) => x.id === e.target.value); if (m) setBody(m.body) }} />
             </Field>
-            <Field label="Message" className="mt-3"><Textarea rows={6} value={body} onChange={(e) => setBody(e.target.value)} /></Field>
-            <p className="text-[12px] text-gray-500 mt-1">{body.length} characters{dueOnly && ' · {due} is replaced by each customer\'s due'}</p>
-            <Button className="mt-3" onClick={send}><Send size={14} /> Send</Button>
+            <Field label="Message"><Textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} /></Field>
+            <p className="text-[12px] text-gray-500">{body.length} characters · {'{name}'} and {'{due}'} are replaced for each person. Templates are made on Basic Settings › Messaging › Create Text Message.</p>
           </div>
-          <div>
-            <div className="flex justify-between text-[13px] mb-2">
-              <b>Recipients</b>
-              <button className="text-primary" onClick={() => setPicked(Object.fromEntries(recipients.map((r) => [r.id, true])))}>Select all</button>
-            </div>
-            <div className="border rounded max-h-72 overflow-y-auto text-[13px]">
-              {recipients.map((r) => (
-                <label key={r.id} className="flex items-center gap-2 px-3 py-2 border-b last:border-0">
-                  <input type="checkbox" checked={!!picked[r.id]} onChange={(e) => setPicked({ ...picked, [r.id]: e.target.checked })} />
-                  <span className="flex-1">{r.name} <span className="text-gray-400">({r.phone})</span></span>
-                  {dueOnly && <span className="text-danger">{money(r.balance)}</span>}
-                </label>
-              ))}
-              {!recipients.length && <p className="p-3 text-gray-400">No recipients.</p>}
-            </div>
+          <Field label="Contact Category *">
+            <Select value={category} placeholder="--Select Contact Category--" options={CATEGORIES} onChange={(e) => { setCategory(e.target.value); setPicked({}) }} />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-4 mt-5 py-3 px-3 bg-[#f2f2f5] rounded">
+          <SmsTypePicker value={smsType} onChange={setSmsType} />
+          <Button onClick={send}><Send size={14} /> Send</Button>
+          {category && <span className="text-[13px] text-gray-500">{Object.values(picked).filter(Boolean).length} of {list.length} selected</span>}
+        </div>
+        {category && (
+          <div className="overflow-x-auto mt-4">
+            <table className="w-full min-w-[560px] text-[13px] border">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 w-10"><input type="checkbox" aria-label="Select all" checked={allTicked} onChange={(e) => setPicked(e.target.checked ? Object.fromEntries(list.map((r) => [r.id, true])) : {})} /></th>
+                  <th className="px-3 py-2 text-left">SL</th><th className="px-3 py-2 text-left">Phone</th><th className="px-3 py-2 text-left">Name</th><th className="px-3 py-2 text-left">Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((r, i) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="px-3 py-1.5 text-center"><input type="checkbox" aria-label={`Select ${r.name}`} checked={!!picked[r.id]} onChange={(e) => setPicked({ ...picked, [r.id]: e.target.checked })} /></td>
+                    <td className="px-3 py-1.5">{i + 1}</td><td className="px-3 py-1.5">{r.phone}</td><td className="px-3 py-1.5">{r.name}</td>
+                    <td className="px-3 py-1.5 text-gray-600">{fill(body, r)}</td>
+                  </tr>
+                ))}
+                {!list.length && <tr><td colSpan={5} className="px-3 py-3 text-center text-gray-400">No one with a phone number in this category.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      <SentMessages />
+    </>
+  )
+}
+
+export function DueCustomer() {
+  const s = useDb()
+  const list = recipientsOf(s, 'due').sort((a, b) => b.balance - a.balance)
+  const [picked, setPicked] = useState({})
+  const [q, setQ] = useState('')
+  const [smsType, setSmsType] = useState('Non Masking')
+  const [body, setBody] = useState(`Dear {name}, your due amount is {due} ${SHOP.currency}. Please pay soon. - ${SHOP.name}`)
+  const shown = list.filter((r) => !q || [r.name, r.phone, r.address].some((x) => String(x || '').toLowerCase().includes(q.toLowerCase())))
+  const allTicked = shown.length > 0 && shown.every((r) => picked[r.id])
+  const total = shown.reduce((a, r) => a + r.balance, 0)
+  const send = () => { if (queue(list.filter((r) => picked[r.id]), body, smsType)) setPicked({}) }
+  return (
+    <>
+      <PageHeader title="Due Customer" />
+      <Card>
+        <Field label="Message"><Textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} /></Field>
+        <p className="text-[12px] text-gray-500 mt-1">{'{name}'} and {'{due}'} are replaced by each customer&apos;s name and due.</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
+          <SmsTypePicker value={smsType} onChange={setSmsType} />
+          <div className="flex items-center gap-2">
+            <Input className="!w-56" placeholder="Search name / phone / address" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Button color="danger" onClick={send}><Send size={14} /> Send SMS</Button>
           </div>
         </div>
+        <div className="overflow-x-auto mt-4">
+          <table className="w-full min-w-[640px] text-[13px] border">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-3 py-2 w-10"><input type="checkbox" aria-label="Select all" checked={allTicked} onChange={(e) => setPicked(e.target.checked ? { ...picked, ...Object.fromEntries(shown.map((r) => [r.id, true])) } : {})} /></th>
+                <th className="px-3 py-2 text-left">Serial</th><th className="px-3 py-2 text-left">Customer</th><th className="px-3 py-2 text-left">Address</th>
+                <th className="px-3 py-2 text-left">Phone</th><th className="px-3 py-2 text-right">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r, i) => (
+                <tr key={r.id} className="border-t">
+                  <td className="px-3 py-1.5 text-center"><input type="checkbox" aria-label={`Select ${r.name}`} checked={!!picked[r.id]} onChange={(e) => setPicked({ ...picked, [r.id]: e.target.checked })} /></td>
+                  <td className="px-3 py-1.5">{i + 1}</td><td className="px-3 py-1.5">{r.name}</td><td className="px-3 py-1.5">{r.address}</td>
+                  <td className="px-3 py-1.5">{r.phone}</td><td className="px-3 py-1.5 text-right text-danger font-medium">{money(r.balance)}</td>
+                </tr>
+              ))}
+              {!shown.length && <tr><td colSpan={6} className="px-3 py-3 text-center text-gray-400">No customer with a due and a phone number.</td></tr>}
+            </tbody>
+            {shown.length > 0 && <tfoot className="bg-gray-50 font-semibold"><tr className="border-t"><td colSpan={5} className="px-3 py-2 text-right">Total Due</td><td className="px-3 py-2 text-right">{money(total)}</td></tr></tfoot>}
+          </table>
+        </div>
       </Card>
-      <Card title="Sent Messages">
-        <DataTable rows={s.sentMessages.slice().reverse()} columns={[
-          { key: 'date', label: 'Date', render: (r) => displayDate(r.date) }, { key: 'name', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'body', label: 'Message' },
-        ]} />
-      </Card>
+      <SentMessages />
     </>
   )
 }

@@ -25,6 +25,10 @@ export const ACTION_PAGES = [
   { group: 'Damages', path: '/damages', label: 'All Damages', collection: 'damages' },
   { group: 'Product', path: '/products', label: 'Add Product', collection: 'products' },
   { group: 'Product', path: '/products/add-opening-stock', label: 'Bulk Opening Stock', collection: 'products', noDelete: true },
+  { group: 'Accounts', path: '/payments/receive', label: 'Receive From Customer', collection: 'payments', match: (r) => r.type === 'receive' },
+  { group: 'Accounts', path: '/payments/pay', label: 'Pay To Supplier', collection: 'payments', match: (r) => r.type === 'pay' },
+  { group: 'Accounts', path: '/settlements/customer', label: 'Customer Settlement', collection: 'settlements', match: (r) => r.kind === 'customer' },
+  { group: 'Accounts', path: '/settlements/supplier', label: 'Supplier Settlement', collection: 'settlements', match: (r) => r.kind === 'supplier' },
   ...CONTACT_PAGES.map(([type, label]) => ({
     group: 'Registers', path: `/contacts/${type}`, label, collection: 'contacts', match: (r) => r.type === type,
   })),

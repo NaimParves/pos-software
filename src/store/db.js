@@ -118,17 +118,35 @@ export const useCollection = (name) => useSyncExternalStore(subscribe, () => sta
 export const useDb = () => useSyncExternalStore(subscribe, () => state)
 export const useLoadStatus = () => useSyncExternalStore(subscribe, () => status)
 
+// Totals behind a customer's or supplier's balance.
+//  billed:   opening balance + invoices + money paid back to them (return refunds, advance refunds)
+//  received: paid on invoices + returns credited + payments + payment discounts + write-offs
+//  balance:  billed - received. Positive = they owe the shop (customer) / the shop owes them
+//            (supplier). Negative = advance (they have money with the shop / the shop paid ahead).
+// Settlements with refund: true pay an advance back (they raise the balance towards 0);
+// older settlements without it were write-offs of a due.
+export function contactSummary(contact, s = state) {
+  if (!contact) return { billed: 0, received: 0, balance: 0 }
+  const isSupplier = contact.type === 'supplier'
+  const mine = (x) => x.contactId === contact.id
+  const docs = (isSupplier ? s.purchases : s.sales).filter(mine)
+  const returns = (isSupplier ? s.purchaseReturns : s.salesReturns).filter(mine)
+  const payType = isSupplier ? 'pay' : 'receive'
+  const pays = s.payments.filter((p) => mine(p) && p.type === payType)
+  const setts = s.settlements.filter(mine)
+  const n = (v) => Number(v || 0)
+  const billed = n(contact.openingBalance)
+    + docs.reduce((a, d) => a + n(d.invoiceAmount), 0)
+    + returns.reduce((a, d) => a + n(d.paid), 0)
+    + setts.filter((x) => x.refund).reduce((a, x) => a + n(x.amount), 0)
+  const received = docs.reduce((a, d) => a + n(d.invoiceAmount) - n(d.due), 0)
+    + returns.reduce((a, d) => a + n(d.invoiceAmount), 0)
+    + pays.reduce((a, p) => a + n(p.amount) + n(p.discount), 0)
+    + setts.filter((x) => !x.refund).reduce((a, x) => a + n(x.amount), 0)
+  return { billed: Math.round(billed * 100) / 100, received: Math.round(received * 100) / 100, balance: Math.round((billed - received) * 100) / 100 }
+}
+
 // Balance owed by a customer (positive) or owed to a supplier (positive).
 export function contactBalance(contact, s = state) {
-  if (!contact) return 0
-  const isSupplier = contact.type === 'supplier'
-  const docs = isSupplier ? s.purchases : s.sales
-  const returns = isSupplier ? s.purchaseReturns : s.salesReturns
-  const invoiced = docs.filter((x) => x.contactId === contact.id).reduce((a, x) => a + (x.due || 0), 0)
-  // a return credits its amount, minus any cash paid back on the spot
-  const returned = returns.filter((x) => x.contactId === contact.id).reduce((a, x) => a + (x.invoiceAmount || 0) - (x.paid || 0), 0)
-  const payType = isSupplier ? 'pay' : 'receive'
-  const paid = s.payments.filter((p) => p.contactId === contact.id && p.type === payType).reduce((a, p) => a + Number(p.amount || 0), 0)
-  const settled = s.settlements.filter((p) => p.contactId === contact.id).reduce((a, p) => a + Number(p.amount || 0), 0)
-  return Number(contact.openingBalance || 0) + invoiced - returned - paid - settled
+  return contactSummary(contact, s).balance
 }

@@ -5,12 +5,6 @@ const master = (title, collection, extra = []) => ({
   title, collection, listTitle: `All ${title.replace(/^Add /, '')}`,
   fields: [{ key: 'name', label: 'Name', required: true }, ...extra, status],
 })
-const contactSel = (types, label = 'Contact', key = 'contactId') => ({
-  key, label, type: 'combo', required: true,
-  from: { collection: 'contacts', filter: (c) => types.includes(c.type), value: 'id', label: (c) => `${c.name} - ${c.phone}` },
-  render: undefined,
-})
-const contactName = (key = 'contactId') => (r, s) => ({ ...r, contactName: s.contacts.find((c) => c.id === r[key])?.name || '' })
 const method = { key: 'method', label: 'Paid Through', type: 'select', options: PAYMENT_METHODS, required: true }
 const employee = { key: 'employeeId', label: 'Employee', type: 'combo', required: true, from: { collection: 'contacts', filter: (c) => c.type === 'employee', value: 'id', label: 'name' }, hideInList: true }
 const empName = (r, s) => ({ ...r, employeeName: s.contacts.find((c) => c.id === r.employeeId)?.name || '' })
@@ -57,54 +51,6 @@ export const CRUD_PAGES = {
       { key: 'toAcc', label: 'To Account', type: 'select', options: PAYMENT_METHODS, required: true },
       { key: 'amount', label: 'Amount', type: 'number', required: true, money: true },
       { key: 'note', label: 'Note', span: 2 },
-    ],
-  },
-  '/payments/receive': {
-    title: 'Receive From Customer', collection: 'payments', number: 'RCV', dateKey: 'date', defaults: { type: 'receive' }, filter: (p) => p.type === 'receive',
-    transform: contactName(),
-    columns: [{ key: 'date', label: 'Date', type: 'date' }, { key: 'contactName', label: 'Customer' }, { key: 'method', label: 'Through' }, { key: 'amount', label: 'Amount', type: 'number', money: true }, { key: 'note', label: 'Note' }],
-    fields: [
-      { key: 'date', label: 'Date', type: 'date', default: 'today', required: true },
-      contactSel(['customer', 'retailer'], 'Customer'),
-      { key: 'amount', label: 'Amount', type: 'number', required: true },
-      { ...method, label: 'Received Through', default: 'Cash' },
-      { key: 'info', label: 'Account Information' },
-      { key: 'note', label: 'Note' },
-    ],
-  },
-  '/payments/pay': {
-    title: 'Pay To Supplier', collection: 'payments', number: 'PAY', dateKey: 'date', defaults: { type: 'pay' }, filter: (p) => p.type === 'pay',
-    transform: contactName(),
-    columns: [{ key: 'date', label: 'Date', type: 'date' }, { key: 'contactName', label: 'Supplier' }, { key: 'method', label: 'Through' }, { key: 'amount', label: 'Amount', type: 'number', money: true }, { key: 'note', label: 'Note' }],
-    fields: [
-      { key: 'date', label: 'Date', type: 'date', default: 'today', required: true },
-      contactSel(['supplier'], 'Supplier'),
-      { key: 'amount', label: 'Amount', type: 'number', required: true },
-      { ...method, default: 'Cash' },
-      { key: 'info', label: 'Account Information' },
-      { key: 'note', label: 'Note' },
-    ],
-  },
-  '/settlements/customer': {
-    title: 'Customer Settlement', collection: 'settlements', number: 'CS', dateKey: 'date', defaults: { kind: 'customer' }, filter: (p) => p.kind === 'customer',
-    transform: contactName(), help: 'A settlement writes off (discounts) part of a customer\'s due without receiving cash.',
-    columns: [{ key: 'date', label: 'Date', type: 'date' }, { key: 'contactName', label: 'Customer' }, { key: 'amount', label: 'Amount', type: 'number', money: true }, { key: 'note', label: 'Note' }],
-    fields: [
-      { key: 'date', label: 'Date', type: 'date', default: 'today', required: true },
-      contactSel(['customer', 'retailer'], 'Customer'),
-      { key: 'amount', label: 'Settlement Amount', type: 'number', required: true },
-      { key: 'note', label: 'Note' },
-    ],
-  },
-  '/settlements/supplier': {
-    title: 'Supplier Settlement', collection: 'settlements', number: 'SS', dateKey: 'date', defaults: { kind: 'supplier' }, filter: (p) => p.kind === 'supplier',
-    transform: contactName(),
-    columns: [{ key: 'date', label: 'Date', type: 'date' }, { key: 'contactName', label: 'Supplier' }, { key: 'amount', label: 'Amount', type: 'number', money: true }, { key: 'note', label: 'Note' }],
-    fields: [
-      { key: 'date', label: 'Date', type: 'date', default: 'today', required: true },
-      contactSel(['supplier'], 'Supplier'),
-      { key: 'amount', label: 'Settlement Amount', type: 'number', required: true },
-      { key: 'note', label: 'Note' },
     ],
   },
   '/accounts/chart-of-accounts': {
