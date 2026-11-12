@@ -97,7 +97,7 @@ export function Modal({ open, onClose, title, children, wide }) {
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto print:static print:bg-white print:p-0">
-      <div className={`bg-white rounded shadow-lg w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} mt-10 print:mt-0 print:shadow-none`}>
+      <div className={`bg-white rounded shadow-lg w-full ${wide === 'xl' ? 'max-w-6xl' : wide ? 'max-w-4xl' : 'max-w-lg'} mt-10 print:mt-0 print:shadow-none`}>
         <div className="flex items-center justify-between border-b px-5 py-3 print:hidden">
           <h5 className="font-medium text-gray-700">{title}</h5>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>

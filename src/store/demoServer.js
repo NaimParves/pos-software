@@ -146,6 +146,7 @@ function handle(method, path, body, query) {
   if (method === 'POST') {
     const row = sanitize(body)
     if (query.number) row.number = nextNumber(String(query.number))
+    if (col !== 'users') row.createdBy = 'Admin'
     if (col === 'contacts' && !row.code) row.code = Math.max(1000, ...all('contacts').map((c) => Number(c.code) || 0)) + 1
     return insert(col, row)
   }

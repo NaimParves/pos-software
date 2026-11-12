@@ -200,6 +200,7 @@ app.post('/api/:col', requireAuth, checkCollection, guardAdmin, (req, res) => {
   if (col === 'users' && !row.passwordHash) return res.status(400).json({ error: 'Password is required for a new user' })
   const rec = tx(() => {
     if (req.query.number) row.number = store.nextNumber(String(req.query.number))
+    if (col !== 'users') row.createdBy = req.user.name
     if (col === 'contacts' && !row.code) row.code = Math.max(1000, ...store.all('contacts').map((c) => Number(c.code) || 0)) + 1
     return store.insert(col, row)
   })
