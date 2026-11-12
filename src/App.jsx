@@ -5,11 +5,12 @@ import Dashboard from './pages/Dashboard'
 import InvoiceForm from './pages/InvoiceForm'
 import InvoiceList from './pages/InvoiceList'
 import ReturnForm from './pages/ReturnForm'
+import AccountsPayment from './pages/Accounts'
 import Products from './pages/Products'
 import Contacts from './pages/Contacts'
 import CrudPage from './pages/CrudPage'
 import * as R from './pages/Reports'
-import { BarcodePrint, OpeningStock, SendMessage, SetPermission, NotFound } from './pages/Misc'
+import { BarcodePrint, OpeningStock, SendMessage, DueCustomer, SetPermission, NotFound } from './pages/Misc'
 import { CRUD_PAGES } from './config/crudPages'
 import { useEffect } from 'react'
 import { useUser } from './store/auth'
@@ -80,9 +81,15 @@ export default function App() {
         {page('/products/add-opening-stock', <OpeningStock />)}
         <Route path="/contacts/:type" element={<ContactsRoute />} />
 
+        {/* Accounts: payments and settlements */}
+        {page('/payments/receive', <AccountsPayment mode="receive" />)}
+        {page('/payments/pay', <AccountsPayment mode="pay" />)}
+        {page('/settlements/customer', <AccountsPayment mode="customerSettlement" />)}
+        {page('/settlements/supplier', <AccountsPayment mode="supplierSettlement" />)}
+
         {/* Messaging & security */}
         {page('/messages/send-index', <SendMessage />)}
-        {page('/messages/due-customer', <SendMessage dueOnly />)}
+        {page('/messages/due-customer', <DueCustomer />)}
         {page('/accesslevel/set-access', <SetPermission />)}
 
         {/* Reports */}

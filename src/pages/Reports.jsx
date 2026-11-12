@@ -3,13 +3,14 @@ import { Printer, Search, ImageOff } from 'lucide-react'
 import { PageHeader, Card, Input, Select, Button, Modal, Field } from '../components/ui'
 import Combo from '../components/Combo'
 import DataTable from '../components/DataTable'
+import InvoicePrint from '../components/InvoicePrint'
 import { useDb, contactBalance } from '../store/db'
 import { SHOP, PAYMENT_METHODS } from '../config/shop'
-import { displayDate, inRange, money, round2, sftPerPiece, today } from '../utils/format'
+import { displayDate, inRange, money, num, round2, sftPerPiece, today } from '../utils/format'
 
 const sum = (arr, f) => arr.reduce((a, x) => a + Number(typeof f === 'function' ? f(x) : x[f] || 0), 0)
 
-function ReportShell({ title, filters, children }) {
+function ReportShell({ title, subtitle, filters, children }) {
   return (
     <>
       <PageHeader title={title} trail={['Reports', title]} />
@@ -20,6 +21,7 @@ function ReportShell({ title, filters, children }) {
             <p className="text-[11px] text-gray-600">{SHOP.address}</p>
             <p className="text-[11px] text-gray-600">{SHOP.phone}</p>
             <h3 className="text-base font-semibold text-gray-700 mt-1">{title}</h3>
+            {subtitle && <p className="text-[12px] text-gray-600">{subtitle}</p>}
           </div>
           {filters && <div className="flex flex-wrap gap-3 items-end mb-4 print:hidden">{filters}<Button color="success" onClick={() => window.print()}><Printer size={15} /></Button></div>}
           {!filters && <div className="flex justify-end mb-3 print:hidden"><Button color="success" onClick={() => window.print()}><Printer size={15} /> Print</Button></div>}
@@ -125,66 +127,293 @@ export function StockWithImage() {
 }
 
 // ---------- Sales / purchase statements & summaries ----------
-export function StatementReport({ collection, title, party = 'Customer' }) {
-  const s = useDb()
-  const [range, setRange] = useRange()
-  const docs = s[collection].filter((d) => inRange(d.date, range.from, range.to))
-  const lines = docs.flatMap((d) => d.items.map((it) => ({ ...it, date: d.date, number: d.number, contactName: d.contactName, id: d.id + it.productId })))
-  const columns = [
-    { key: 'sl', label: 'SL', render: (_, i) => i + 1, sortable: false },
-    { key: 'date', label: 'Date', render: (r) => displayDate(r.date) },
-    { key: 'number', label: 'Invoice#' }, { key: 'contactName', label: party },
-    { key: 'name', label: 'Product' }, { key: 'qty', label: 'Qty', align: 'right', render: (r) => round2(r.qty) },
-    { key: 'rate', label: 'Rate', align: 'right', render: (r) => money(r.rate) },
-    { key: 'total', label: 'Total', align: 'right', render: (r) => money(r.total) },
-  ]
+const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)))
+
+// Shop header used on the printed statements
+function PrintHead() {
   return (
-    <ReportShell title={title} filters={<DateFilter value={range} onApply={setRange} />}>
-      <DataTable columns={columns} rows={lines} pageSizes={[100, 250]}
-        footer={<tr className="border-t"><td colSpan={7} className="px-3 py-2 text-right">Total</td><td className="px-3 py-2 text-right">{money(sum(lines, 'total'))}</td></tr>} />
-    </ReportShell>
+    <div className="flex items-start justify-between mb-3">
+      <div>
+        {SHOP.logo && <img src={SHOP.logo} alt="" className="w-14 h-auto" onError={(e) => { e.currentTarget.style.display = 'none' }} />}
+      </div>
+      <div className="text-right text-[11px] text-gray-600 leading-4">
+        <p className="font-semibold text-[13px] text-gray-800">{SHOP.name}</p>
+        <p>{SHOP.address}</p>
+        <p>{SHOP.phone}</p>
+        <p>Print Date: {displayDate(today())}</p>
+      </div>
+    </div>
   )
 }
 
+// Statement of Sales / Statement of Purchase: a query page; Show or Print
+// lists every matching invoice line, with the invoice totals beside them.
+export function StatementReport({ collection, title, party = 'Customer' }) {
+  const s = useDb()
+  const sale = collection === 'sales'
+  const word = sale ? 'Sales' : 'Purchase'
+  const retCol = sale ? 'salesReturns' : 'purchaseReturns'
+  const docsAll = s[collection]
+  const contacts = s.contacts.filter((c) => (sale ? ['customer', 'retailer'] : ['supplier']).includes(c.type))
+  const blankF = { from: monthStart(), to: today(), contactId: '', company: '', docId: '', category: '', productId: '', code: '', referenceId: '', by: '', kind: '' }
+  const [f, setF] = useState(blankF)
+  const [a, setA] = useState(null)
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }))
+  const run = (print) => { setA({ ...f }); if (print) setTimeout(() => window.print(), 400) }
+
+  const prod = (id) => s.products.find((p) => p.id === id)
+  const contactOf = (d) => s.contacts.find((c) => c.id === d.contactId)
+  const name = (id) => s.contacts.find((c) => c.id === id)?.name || ''
+
+  const report = useMemo(() => {
+    if (!a) return null
+    const docOk = (d, isReturn) => inRange(d.date, a.from, a.to)
+      && (!a.contactId || d.contactId === a.contactId)
+      && (!a.company || contactOf(d)?.organization === a.company)
+      && (!a.docId || (isReturn ? d.sourceId === a.docId : d.id === a.docId))
+      && (!a.referenceId || d.referenceId === a.referenceId)
+      && (!a.by || (d.createdBy || '') === a.by)
+    const lineOk = (it) => (!a.category || (prod(it.productId)?.category || '') === a.category)
+      && (!a.productId || it.productId === a.productId)
+      && (!a.code || (it.code || prod(it.productId)?.code) === a.code)
+    const groups = [
+      ...(a.kind !== 'R' ? docsAll.map((d) => ({ d, type: sale ? 'S' : 'P', sign: 1 })) : []),
+      ...(a.kind !== 'S' ? s[retCol].map((d) => ({ d, type: 'R', sign: -1 })) : []),
+    ]
+      .filter(({ d, type }) => docOk(d, type === 'R'))
+      .map((g) => ({ ...g, lines: g.d.items.filter(lineOk) }))
+      .filter((g) => g.lines.length)
+      .sort((x, y) => x.d.date.localeCompare(y.d.date) || String(x.d.number).localeCompare(String(y.d.number)))
+      .map((g) => {
+        const lines = g.lines.map((it) => {
+          const p = prod(it.productId) || {}
+          const tPrice = num(it.qty) * num(it.rate)
+          return {
+            code: it.code || p.code || '', name: it.name || p.name || '', um: (it.kind || p.kind) === 'Tiles' ? 'SFT' : 'PCS',
+            qty: num(it.qty), rate: num(it.rate), tPrice, disc: round2(tPrice - num(it.total)), payable: num(it.total),
+          }
+        })
+        // profit on a sale at today's purchase prices (labour cost and VAT are passed on, not profit)
+        const cost = g.d.items.reduce((acc, it) => acc + num(it.qty) * num(prod(it.productId)?.purchasePrice), 0)
+        const profit = sale && g.type === 'S' ? round2(num(g.d.invoiceAmount) - num(g.d.laborCost) - num(g.d.vat) - cost) : null
+        return { ...g, lines, profit }
+      })
+    const tot = (fn) => round2(groups.reduce((acc, g) => acc + g.sign * fn(g), 0))
+    const totals = {
+      tPrice: tot((g) => g.lines.reduce((x, l) => x + l.tPrice, 0)),
+      disc: tot((g) => g.lines.reduce((x, l) => x + l.disc, 0)),
+      payable: tot((g) => g.lines.reduce((x, l) => x + l.payable, 0)),
+      vat: tot((g) => num(g.d.vat)), tDisc: tot((g) => num(g.d.discount)), net: tot((g) => num(g.d.invoiceAmount)),
+      paid: tot((g) => num(g.d.paid)), due: tot((g) => num(g.d.due)), profit: tot((g) => num(g.profit)),
+    }
+    return { groups, totals }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a, s])
+
+  const contactOpts = [{ value: '', label: 'All' }, ...contacts.map((c) => ({ value: c.id, label: `${c.name}${c.phone ? ` - ${c.phone}` : ''}` }))]
+  const row = (label, el) => (
+    <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr] items-center gap-2">
+      <span className="sm:text-right text-[13px] font-medium text-gray-600">{label}</span>{el}
+    </div>
+  )
+  const filterText = (v, list) => (v ? list.find((o) => o.value === v)?.label || v : 'ALL')
+  const th = 'border border-gray-400 px-1.5 py-1 font-semibold bg-gray-100'
+  const td = 'border border-gray-300 px-1.5 py-1'
+
+  return (
+    <>
+      <PageHeader title={title} trail={['Reports', title]} />
+      <Card className="print:hidden">
+        <div className="max-w-3xl mx-auto space-y-3">
+          <div className="grid sm:grid-cols-[150px_1fr_auto_1fr] items-center gap-2">
+            <span className="sm:text-right text-[13px] font-medium text-gray-600">From Date</span>
+            <Input type="date" value={f.from} onChange={(e) => set('from', e.target.value)} />
+            <span className="text-[13px] font-medium text-gray-600 px-2">To</span>
+            <Input type="date" value={f.to} onChange={(e) => set('to', e.target.value)} />
+          </div>
+          {row(sale ? 'Customer/Retailer' : 'Supplier', <Combo value={f.contactId} onChange={(v) => set('contactId', v)} placeholder="All" options={contactOpts} />)}
+          {row(`${party} Company`, <Select value={f.company} onChange={(e) => set('company', e.target.value)} placeholder="All" options={uniq(contacts.map((c) => c.organization))} />)}
+          {row(`${word} ID`, <Combo value={f.docId} onChange={(v) => set('docId', v)} placeholder="All" options={[{ value: '', label: 'All' }, ...docsAll.slice().reverse().map((d) => ({ value: d.id, label: `${d.number} | ${d.contactName}` }))]} />)}
+          {row('Category Name', <Select value={f.category} onChange={(e) => set('category', e.target.value)} placeholder="All" options={s.categories.map((c) => c.name)} />)}
+          <div className="grid sm:grid-cols-[150px_1fr_auto_1fr] items-center gap-2">
+            <span className="sm:text-right text-[13px] font-medium text-gray-600">Item Name</span>
+            <Combo value={f.productId} onChange={(v) => set('productId', v)} placeholder="All" options={[{ value: '', label: 'All' }, ...s.products.map((p) => ({ value: p.id, label: p.name }))]} />
+            <span className="text-[13px] font-medium text-gray-600 px-2">Code</span>
+            <Combo value={f.code} onChange={(v) => set('code', v)} placeholder="All" options={[{ value: '', label: 'All' }, ...uniq(s.products.map((p) => p.code)).map((c) => ({ value: c, label: c }))]} />
+          </div>
+          {sale && row('Reference', <Select value={f.referenceId} onChange={(e) => set('referenceId', e.target.value)} placeholder="All" options={s.contacts.filter((c) => c.type === 'reference').map((c) => ({ value: c.id, label: c.name }))} />)}
+          {row(`${word} By`, <Select value={f.by} onChange={(e) => set('by', e.target.value)} placeholder="All" options={uniq([...docsAll, ...s[retCol]].map((d) => d.createdBy))} />)}
+          {row(`${word}/Return`, <Select value={f.kind} onChange={(e) => set('kind', e.target.value)} placeholder={`${word} and Return`} options={[{ value: 'S', label: `${word} only` }, { value: 'R', label: 'Return only' }]} />)}
+          <div className="sm:pl-[158px] flex gap-2">
+            <Button onClick={() => run(false)}><Search size={15} /> Show</Button>
+            <Button color="success" onClick={() => run(true)}><Printer size={15} /> Print</Button>
+            <Button color="secondary" onClick={() => { setF(blankF); setA(null) }}>Reset</Button>
+          </div>
+        </div>
+      </Card>
+
+      {report && (
+        <Card>
+          <div className="print-area text-[11px] text-gray-800">
+            <PrintHead />
+            <h3 className="text-center font-semibold text-[14px] bg-gray-100 py-1.5 mb-2">{title}</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse mb-2">
+                <thead>
+                  <tr>
+                    <th className={th}>Date From</th><th className={th}>Item Category</th><th className={th}>{word} Type</th>
+                    <th className={th}>{word} By</th><th className={th}>{word} ID</th><th className={th}>{party} Name</th>
+                    {sale && <th className={th}>Reference</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="text-center">
+                    <td className={td}>{displayDate(a.from) || '…'} To {displayDate(a.to) || '…'}</td>
+                    <td className={td}>{a.category || 'ALL'}</td>
+                    <td className={td}>{a.kind === 'S' ? word.toUpperCase() : a.kind === 'R' ? 'RETURN' : 'ALL'}</td>
+                    <td className={td}>{a.by || 'ALL'}</td>
+                    <td className={td}>{a.docId ? docsAll.find((d) => d.id === a.docId)?.number : 'ALL'}</td>
+                    <td className={td}>{filterText(a.contactId, contactOpts)}</td>
+                    {sale && <td className={td}>{a.referenceId ? name(a.referenceId) : 'ALL'}</td>}
+                  </tr>
+                </tbody>
+              </table>
+              <table className="w-full min-w-[1100px] border-collapse">
+                <thead>
+                  <tr>
+                    {['SL', 'T/Date', `${word} ID`, 'Item Code', 'Name', 'U/M', 'Qty', 'Unit Price', 'T/Price', 'Discount', 'T/Payable', 'VAT', 'T/Discount', 'N/Payable', 'Paid',
+                      sale ? 'Profit/Loss' : 'Due', `${party} Name`, 'Type'].map((h) => <th key={h} className={th}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.groups.map((g, gi) => g.lines.map((l, li) => {
+                    const span = g.lines.length
+                    const inv = (v, cls = 'text-right') => (li === 0 ? <td rowSpan={span} className={`${td} ${cls}`}>{v}</td> : null)
+                    return (
+                      <tr key={`${g.d.id}-${li}`} className={g.type === 'R' ? 'text-danger' : ''}>
+                        {inv(gi + 1, 'text-center')}
+                        {inv(g.d.date, 'text-center whitespace-nowrap')}
+                        {inv(g.d.number, 'text-center')}
+                        <td className={td}>{l.code}</td><td className={td}>{l.name}</td><td className={`${td} text-center`}>{l.um}</td>
+                        <td className={`${td} text-right`}>{round2(l.qty)}</td><td className={`${td} text-right`}>{round2(l.rate)}</td>
+                        <td className={`${td} text-right`}>{round2(l.tPrice)}</td><td className={`${td} text-right`}>{round2(l.disc)}</td>
+                        <td className={`${td} text-right`}>{round2(l.payable)}</td>
+                        {inv(round2(g.d.vat))}{inv(round2(g.d.discount))}{inv(round2(g.d.invoiceAmount))}{inv(round2(g.d.paid))}
+                        {inv(sale ? (g.profit === null ? '' : round2(g.profit)) : round2(g.d.due))}
+                        {inv(g.d.contactName, 'text-left')}
+                        {inv(g.type, 'text-center')}
+                      </tr>
+                    )
+                  }))}
+                  {!report.groups.length && <tr><td colSpan={18} className={`${td} text-center text-gray-500 py-3`}>Nothing matches these filters.</td></tr>}
+                </tbody>
+                {report.groups.length > 0 && (
+                  <tfoot className="font-semibold bg-gray-50">
+                    <tr>
+                      <td colSpan={8} className={`${td} text-right`}>Total{a.kind !== 'S' && ' (returns subtracted)'}</td>
+                      <td className={`${td} text-right`}>{money(report.totals.tPrice)}</td><td className={`${td} text-right`}>{money(report.totals.disc)}</td>
+                      <td className={`${td} text-right`}>{money(report.totals.payable)}</td><td className={`${td} text-right`}>{money(report.totals.vat)}</td>
+                      <td className={`${td} text-right`}>{money(report.totals.tDisc)}</td><td className={`${td} text-right`}>{money(report.totals.net)}</td>
+                      <td className={`${td} text-right`}>{money(report.totals.paid)}</td>
+                      <td className={`${td} text-right`}>{money(sale ? report.totals.profit : report.totals.due)}</td>
+                      <td colSpan={2} className={td} />
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+            <p className="mt-2 text-[10px] text-gray-500">
+              Type: {sale ? 'S = Sale' : 'P = Purchase'}, R = Return (shown in red).{sale && ' Profit/Loss = N/Payable − labour cost − VAT − cost of the items at their current purchase price.'}
+            </p>
+          </div>
+        </Card>
+      )}
+    </>
+  )
+}
+
+// Sales Summary / Purchase Summary: one row per invoice with column totals.
+// Clicking the invoice number opens the invoice.
 export function SummaryReport({ collection, title }) {
   const s = useDb()
-  const [range, setRange] = useRange()
-  const docs = s[collection].filter((d) => inRange(d.date, range.from, range.to))
-  const byDate = Object.values(docs.reduce((m, d) => {
-    const r = m[d.date] || { id: d.date, date: d.date, count: 0, amount: 0, discount: 0, paid: 0, due: 0 }
-    r.count += 1; r.amount += d.invoiceAmount; r.discount += d.discount || 0; r.paid += d.paid; r.due += d.due
-    m[d.date] = r
-    return m
-  }, {})).sort((a, b) => a.date.localeCompare(b.date))
+  const sale = collection === 'sales'
+  const contacts = s.contacts.filter((c) => (sale ? ['customer', 'retailer'] : ['supplier']).includes(c.type))
+  const [f, setF] = useState({ from: today(), to: today(), contactId: '' })
+  const [a, setA] = useState(f)
+  const [open, setOpen] = useState(null)
+  const rows = s[collection]
+    .filter((d) => inRange(d.date, a.from, a.to) && (!a.contactId || d.contactId === a.contactId))
+    .slice().sort((x, y) => x.date.localeCompare(y.date) || String(x.number).localeCompare(String(y.number)))
+    .map((d) => ({ ...d, gross: num(d.invoiceAmount) + num(d.discount) }))
+  const L = sale
+    ? { no: 'Invoice#', party: 'Customer', gross: 'Invoice Amount', net: 'Receivable', paid: 'Received' }
+    : { no: 'Bill#', party: 'Supplier', gross: 'Bill Amount', net: 'Payable', paid: 'Paid' }
   const columns = [
-    { key: 'date', label: 'Date', render: (r) => displayDate(r.date) },
-    { key: 'count', label: 'Invoices', align: 'right' },
-    { key: 'discount', label: 'Discount', align: 'right', render: (r) => money(r.discount) },
-    { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
-    { key: 'paid', label: 'Paid', align: 'right', render: (r) => money(r.paid) },
-    { key: 'due', label: 'Due', align: 'right', render: (r) => money(r.due) },
+    { key: 'sl', label: 'SL', render: (_, i) => i + 1, sortable: false },
+    { key: 'number', label: L.no, render: (d) => <button className="text-primary hover:underline" onClick={() => setOpen(d)}>{d.number}</button> },
+    { key: 'date', label: 'Date', render: (d) => displayDate(d.date) },
+    { key: 'contactName', label: L.party },
+    { key: 'gross', label: L.gross, align: 'right', render: (d) => money(d.gross) },
+    { key: 'discount', label: 'Discount', align: 'right', render: (d) => money(d.discount) },
+    { key: 'invoiceAmount', label: L.net, align: 'right', render: (d) => money(d.invoiceAmount) },
+    { key: 'paid', label: L.paid, align: 'right', render: (d) => money(d.paid) },
+    { key: 'due', label: 'Due', align: 'right', render: (d) => money(d.due) },
   ]
+  const t = (k) => money(sum(rows, k))
+  const cell = 'px-3 py-2 text-right'
   return (
-    <ReportShell title={title} filters={<DateFilter value={range} onApply={setRange} />}>
-      <DataTable columns={columns} rows={byDate} searchable={false}
-        footer={<tr className="border-t"><td className="px-3 py-2">Total</td><td className="px-3 py-2 text-right">{sum(byDate, 'count')}</td><td className="px-3 py-2 text-right">{money(sum(byDate, 'discount'))}</td><td className="px-3 py-2 text-right">{money(sum(byDate, 'amount'))}</td><td className="px-3 py-2 text-right">{money(sum(byDate, 'paid'))}</td><td className="px-3 py-2 text-right">{money(sum(byDate, 'due'))}</td></tr>} />
+    <ReportShell title={title} subtitle={`From ${displayDate(a.from) || '…'} To ${displayDate(a.to) || '…'}`} filters={(
+      <>
+        <Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field>
+        <Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
+        <Field label={L.party}>
+          <Combo className="w-64" value={f.contactId} onChange={(v) => setF({ ...f, contactId: v })} placeholder={`-- All ${L.party}s --`}
+            options={[{ value: '', label: `-- All ${L.party}s --` }, ...contacts.map((c) => ({ value: c.id, label: c.name }))]} />
+        </Field>
+        <Button color="success" onClick={() => setA(f)}>Search</Button>
+      </>
+    )}>
+      <DataTable columns={columns} rows={rows} pageSizes={[100, 250, 500]}
+        footer={rows.length > 0 && (
+          <tr className="border-t">
+            <td colSpan={4} className={cell}>Total</td>
+            <td className={cell}>{t('gross')}</td><td className={cell}>{t('discount')}</td><td className={cell}>{t('invoiceAmount')}</td>
+            <td className={cell}>{t('paid')}</td><td className={cell}>{t('due')}</td>
+          </tr>
+        )} />
+      <Modal open={!!open} onClose={() => setOpen(null)} title={open && `${sale ? 'Invoice' : 'Bill'} ${open.number}`} wide>
+        {open && <InvoicePrint doc={open} />}
+      </Modal>
     </ReportShell>
   )
 }
 
 export function AccountListReport({ collection, title }) {
   const s = useDb()
-  const [range, setRange] = useRange()
-  const rows = s[collection].filter((d) => inRange(d.date, range.from, range.to))
+  const headType = collection === 'expenses' ? 'Expense' : 'Income'
+  const [f, setF] = useState({ from: monthStart(), to: today(), head: '' })
+  const [a, setA] = useState(f)
+  const rows = s[collection].filter((d) => inRange(d.date, a.from, a.to) && (!a.head || d.head === a.head))
+  const heads = uniq([...s.accountHeads.filter((h) => h.type === headType).map((h) => h.name), ...s[collection].map((d) => d.head)])
   const columns = [
-    { key: 'date', label: 'Date', render: (r) => displayDate(r.date) }, { key: 'number', label: 'Number' },
-    { key: 'head', label: 'Account Head' }, { key: 'contact', label: 'Contact' }, { key: 'method', label: 'Through' },
+    { key: 'sl', label: 'SL', render: (_, i) => i + 1, sortable: false },
+    { key: 'date', label: 'Date', render: (r) => displayDate(r.date) }, { key: 'number', label: `${headType}#` },
+    { key: 'method', label: 'Paid Through' }, { key: 'head', label: 'Account Head' }, { key: 'contact', label: 'Contact' },
     { key: 'note', label: 'Note' }, { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
   ]
   return (
-    <ReportShell title={title} filters={<DateFilter value={range} onApply={setRange} />}>
-      <DataTable columns={columns} rows={rows}
-        footer={<tr className="border-t"><td colSpan={6} className="px-3 py-2 text-right">Total</td><td className="px-3 py-2 text-right">{money(sum(rows, 'amount'))}</td></tr>} />
+    <ReportShell title={title} subtitle={`From ${displayDate(a.from) || '…'} To ${displayDate(a.to) || '…'}${a.head ? ` · ${a.head}` : ''}`} filters={(
+      <>
+        <Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field>
+        <Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
+        <Field label="Account Head">
+          <Combo className="w-60" value={f.head} onChange={(v) => setF({ ...f, head: v })} placeholder="---All---" options={[{ value: '', label: '---All---' }, ...heads.map((h) => ({ value: h, label: h }))]} />
+        </Field>
+        <Button color="success" onClick={() => setA(f)}><Search size={15} /> Search</Button>
+      </>
+    )}>
+      <DataTable columns={columns} rows={rows} pageSizes={[100, 250, 500]}
+        footer={<tr className="border-t"><td colSpan={7} className="px-3 py-2 text-right">Total</td><td className="px-3 py-2 text-right">{money(sum(rows, 'amount'))}</td></tr>} />
     </ReportShell>
   )
 }
@@ -199,7 +428,9 @@ function cashFlows(s) {
   pays(s.purchaseReturns, 'Purchase Return', 'in')
   s.expenses.forEach((e) => flows.push({ date: e.date, desc: `Expense - ${e.head}`, method: e.method, out: e.amount }))
   s.incomes.forEach((e) => flows.push({ date: e.date, desc: `Income - ${e.head}`, method: e.method, in: e.amount }))
-  s.payments.forEach((p) => flows.push({ date: p.date, desc: `${p.type === 'receive' ? 'Received from' : 'Paid to'} ${p.contactName}`, method: p.method, [p.type === 'receive' ? 'in' : 'out']: p.amount }))
+  s.payments.forEach((p) => flows.push({ date: p.date, desc: `${p.type === 'receive' ? 'Received from' : 'Paid to'} ${p.contactName}`, method: p.method, [p.type === 'receive' ? 'in' : 'out']: Number(p.amount) }))
+  // advance paid back: to a customer (out) or by a supplier (in)
+  s.settlements.filter((x) => x.refund).forEach((x) => flows.push({ date: x.date, desc: `Settlement ${x.number || ''} - ${x.contactName}`, method: x.method || 'Cash', [x.kind === 'supplier' ? 'in' : 'out']: Number(x.amount) }))
   s.paySlips.forEach((p) => flows.push({ date: p.date, desc: `Salary - ${p.employeeName}`, method: p.method, out: p.amount }))
   s.transfers.forEach((t) => {
     flows.push({ date: t.date, desc: `Transfer to ${t.toAcc}`, method: t.fromAcc, out: t.amount })
@@ -275,20 +506,44 @@ export function DailyReport() {
 }
 
 // ---------- Ledgers ----------
+// Search by name / phone / address and filter by dues; Action opens the ledger.
 export function LedgerReport({ supplier }) {
   const s = useDb()
   const [view, setView] = useState(null)
   const types = supplier ? ['supplier'] : ['customer', 'retailer']
-  const rows = s.contacts.filter((c) => types.includes(c.type)).map((c) => ({ ...c, balance: contactBalance(c, s) }))
+  const word = supplier ? 'Supplier' : 'Customer'
+  const all = s.contacts.filter((c) => types.includes(c.type)).map((c) => ({ ...c, balance: contactBalance(c, s) }))
+  const [f, setF] = useState({ contactId: '', q: '', dues: 'due' })
+  const [a, setA] = useState(f)
+  const q = a.q.trim().toLowerCase()
+  const rows = all
+    .filter((c) => !a.contactId || c.id === a.contactId)
+    .filter((c) => !q || [c.name, c.phone, c.altPhone, c.address, c.organization, c.code].some((x) => String(x ?? '').toLowerCase().includes(q)))
+    .filter((c) => ({ all: true, due: c.balance > 0.005, none: Math.abs(c.balance) <= 0.005, advance: c.balance < -0.005 }[a.dues]))
+    .sort((x, y) => x.name.localeCompare(y.name))
   const columns = [
-    { key: 'code', label: 'ID' }, { key: 'name', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'address', label: 'Address' },
-    { key: 'balance', label: 'Balance', align: 'right', render: (r) => <span className={r.balance > 0 ? 'text-danger font-medium' : ''}>{money(r.balance)}</span> },
+    { key: 'sl', label: 'Serial', render: (_, i) => i + 1, sortable: false },
+    { key: 'name', label: word }, { key: 'address', label: 'Address' }, { key: 'phone', label: 'Phone' },
+    { key: 'balance', label: 'Balance', align: 'right', render: (r) => <span className={r.balance > 0 ? 'text-danger font-medium' : r.balance < 0 ? 'text-success' : ''}>{money(r.balance)}</span> },
     { key: 'action', label: 'Action', render: (r) => <Button color="info" className="!py-1" onClick={() => setView(r)}>Ledger</Button> },
   ]
+  const duesLabel = { all: 'All', due: 'Dues Available', none: 'No Dues', advance: 'Advance' }
   return (
-    <ReportShell title={supplier ? 'Supplier Ledger' : 'Customer Ledger'}>
-      <DataTable columns={columns} rows={rows}
-        footer={<tr className="border-t"><td colSpan={4} className="px-3 py-2 text-right">Total</td><td className="px-3 py-2 text-right">{money(sum(rows, 'balance'))}</td><td /></tr>} />
+    <ReportShell title={`${word} Ledger`} subtitle={`${duesLabel[a.dues]}${a.q ? ` · "${a.q}"` : ''}`} filters={(
+      <>
+        <Field label={word}>
+          <Combo className="w-60" value={f.contactId} onChange={(v) => setF({ ...f, contactId: v })} placeholder={`--All ${word}s--`}
+            options={[{ value: '', label: `--All ${word}s--` }, ...all.map((c) => ({ value: c.id, label: `${c.name}${c.phone ? ` - ${c.phone}` : ''}` }))]} />
+        </Field>
+        <Field label="Name / Number / Address"><Input className="!w-56" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && setA(f)} /></Field>
+        <Field label="Dues">
+          <Select className="!w-40" value={f.dues} onChange={(e) => setF({ ...f, dues: e.target.value })} options={Object.entries(duesLabel).map(([value, label]) => ({ value, label }))} />
+        </Field>
+        <Button color="success" onClick={() => setA(f)}><Search size={15} /> Search</Button>
+      </>
+    )}>
+      <DataTable columns={columns} rows={rows} pageSizes={[100, 250, 500]}
+        footer={rows.length > 0 && <tr className="border-t"><td colSpan={4} className="px-3 py-2 text-right">Total</td><td className="px-3 py-2 text-right">{money(sum(rows, 'balance'))}</td><td /></tr>} />
       <Modal open={!!view} onClose={() => setView(null)} title={`Ledger - ${view?.name}`} wide>
         {view && <ContactLedger contact={view} />}
       </Modal>
@@ -309,8 +564,13 @@ function ContactLedger({ contact }) {
       e.push({ date: d.date, desc: `Return ${d.number}`, debit: 0, credit: d.invoiceAmount })
       if (d.paid) e.push({ date: d.date, desc: `Return paid on ${d.number}`, debit: d.paid, credit: 0 })
     })
-    s.payments.filter((p) => p.contactId === contact.id).forEach((p) => e.push({ date: p.date, desc: `Payment ${p.number || ''}`, debit: 0, credit: p.amount }))
-    s.settlements.filter((p) => p.contactId === contact.id).forEach((p) => e.push({ date: p.date, desc: 'Settlement', debit: 0, credit: p.amount }))
+    s.payments.filter((p) => p.contactId === contact.id).forEach((p) => {
+      e.push({ date: p.date, desc: `Payment ${p.number || ''}`, debit: 0, credit: Number(p.amount) })
+      if (Number(p.discount)) e.push({ date: p.date, desc: `Discount on ${p.number || 'payment'}`, debit: 0, credit: Number(p.discount) })
+    })
+    s.settlements.filter((p) => p.contactId === contact.id).forEach((p) => e.push(p.refund
+      ? { date: p.date, desc: `Advance settled ${p.number || ''}`, debit: Number(p.amount), credit: 0 }
+      : { date: p.date, desc: 'Settlement (write-off)', debit: 0, credit: Number(p.amount) }))
     e.sort((a, b) => a.date.localeCompare(b.date))
     let bal = Number(contact.openingBalance || 0)
     return [{ date: '', desc: 'Opening Balance', debit: 0, credit: 0, balance: bal }, ...e.map((x) => ({ ...x, balance: (bal += x.debit - x.credit) }))]
