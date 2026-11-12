@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { Printer, Search, ImageOff } from 'lucide-react'
 import { PageHeader, Card, Input, Select, Button, Modal, Field } from '../components/ui'
 import Combo from '../components/Combo'
@@ -418,46 +418,166 @@ export function AccountListReport({ collection, title }) {
   )
 }
 
-// Every money movement as { date, desc, method, in, out }
+// Every money movement, in the wording of the printed books:
+// { date, vid, particulars, verb, name, daily, method, in, out, note, entryBy, transfer? }
+const MOVES = {
+  sale: ['Sales of Items', 'Received from', 'Received From Product Sale'],
+  purchase: ['Purchase of Items', 'Paid to', 'Paid For Product Purchase'],
+  salesReturn: ['Sales Return of Items', 'Paid to', 'Paid For Return'],
+  purchaseReturn: ['Purchase Return', 'Received from', 'Received For Purchase Return'],
+  receive: ['Previous Due Collection', 'Received from', 'Previous Due Collection'],
+  pay: ['Previous Due Paid', 'Paid to', 'Previous Due Paid'],
+  customerAdvance: ['Return Customer Advance', 'Paid to', 'Customer Advance Returned'],
+  supplierAdvance: ['Supplier Advance Return', 'Received from', 'Supplier Advance Returned'],
+  expense: ['Expense', 'Against', 'Expense'],
+  income: ['Income', 'Against', 'Income'],
+  salary: ['Salary', 'Paid to', 'Salary Paid'],
+}
 function cashFlows(s) {
   const flows = []
-  const pays = (docs, label, dir) => docs.forEach((d) => (d.payments || []).forEach((p) => flows.push({ date: d.date, desc: `${label} ${d.number} - ${d.contactName}`, method: p.method, [dir]: Number(p.amount) })))
-  pays(s.sales, 'Sale', 'in')
-  pays(s.purchases, 'Purchase', 'out')
-  pays(s.salesReturns, 'Sales Return', 'out')
-  pays(s.purchaseReturns, 'Purchase Return', 'in')
-  s.expenses.forEach((e) => flows.push({ date: e.date, desc: `Expense - ${e.head}`, method: e.method, out: e.amount }))
-  s.incomes.forEach((e) => flows.push({ date: e.date, desc: `Income - ${e.head}`, method: e.method, in: e.amount }))
-  s.payments.forEach((p) => flows.push({ date: p.date, desc: `${p.type === 'receive' ? 'Received from' : 'Paid to'} ${p.contactName}`, method: p.method, [p.type === 'receive' ? 'in' : 'out']: Number(p.amount) }))
-  // advance paid back: to a customer (out) or by a supplier (in)
-  s.settlements.filter((x) => x.refund).forEach((x) => flows.push({ date: x.date, desc: `Settlement ${x.number || ''} - ${x.contactName}`, method: x.method || 'Cash', [x.kind === 'supplier' ? 'in' : 'out']: Number(x.amount) }))
-  s.paySlips.forEach((p) => flows.push({ date: p.date, desc: `Salary - ${p.employeeName}`, method: p.method, out: p.amount }))
+  const add = (kind, m) => {
+    const [particulars, verb, daily] = MOVES[kind] || ['Balance Transfer', '', '']
+    flows.push({ particulars, verb, daily, vid: '', note: '', entryBy: '', in: 0, out: 0, ...m, method: m.method || 'Cash' })
+  }
+  const docPays = (docs, kind, dir) => docs.forEach((d) => (d.payments || []).forEach((p) => add(kind, {
+    date: d.date, at: d.createdAt, vid: d.number, name: d.contactName, method: p.method, [dir]: num(p.amount), note: p.note || '', entryBy: d.createdBy,
+  })))
+  docPays(s.sales, 'sale', 'in')
+  docPays(s.purchases, 'purchase', 'out')
+  docPays(s.salesReturns, 'salesReturn', 'out')
+  docPays(s.purchaseReturns, 'purchaseReturn', 'in')
+  const rec = (r) => ({ date: r.date, at: r.createdAt, vid: r.number || '', method: r.method, note: r.note || '', entryBy: r.createdBy })
+  s.payments.forEach((p) => add(p.type === 'receive' ? 'receive' : 'pay', { ...rec(p), name: p.contactName, [p.type === 'receive' ? 'in' : 'out']: num(p.amount) }))
+  s.settlements.filter((x) => x.refund).forEach((x) => add(x.kind === 'supplier' ? 'supplierAdvance' : 'customerAdvance', { ...rec(x), name: x.contactName, [x.kind === 'supplier' ? 'in' : 'out']: num(x.amount) }))
+  s.expenses.forEach((e) => add('expense', { ...rec(e), name: e.head, out: num(e.amount) }))
+  s.incomes.forEach((e) => add('income', { ...rec(e), name: e.head, in: num(e.amount) }))
+  s.paySlips.forEach((p) => add('salary', { ...rec(p), name: p.employeeName, out: num(p.amount) }))
   s.transfers.forEach((t) => {
-    flows.push({ date: t.date, desc: `Transfer to ${t.toAcc}`, method: t.fromAcc, out: t.amount })
-    flows.push({ date: t.date, desc: `Transfer from ${t.fromAcc}`, method: t.toAcc, in: t.amount })
+    const base = { ...rec(t), transfer: true, desc: `From ${t.fromAcc} To ${t.toAcc}` }
+    add('transfer', { ...base, method: t.fromAcc, out: num(t.amount) })
+    add('transfer', { ...base, method: t.toAcc, in: num(t.amount) })
   })
-  return flows.map((f, i) => ({ id: i, in: 0, out: 0, ...f })).sort((a, b) => a.date.localeCompare(b.date))
+  return flows
+    .map((f, i) => ({ id: i, ...f }))
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.at || '').localeCompare(String(b.at || '')))
+}
+
+const Desc = ({ f }) => (f.transfer ? <>{f.desc}</> : <>{f.verb} <b>{f.name}</b></>)
+const n0 = (v) => Math.round(num(v)).toLocaleString('en-US')
+
+// Shell for the printed books: query bar, then the A4 report
+function BookShell({ title, filters, children }) {
+  return (
+    <>
+      <PageHeader title={title} trail={['Reports', title]} />
+      <Card>
+        <div className="flex flex-wrap gap-3 items-end mb-4 print:hidden">
+          {filters}
+          <Button color="success" onClick={() => window.print()}><Printer size={15} /> Print</Button>
+        </div>
+        <div className="print-area text-[12px] text-gray-800">
+          <PrintHead />
+          <h3 className="text-center font-semibold text-[16px] border-y py-2 mb-3">{title}</h3>
+          <div className="overflow-x-auto">{children}</div>
+        </div>
+      </Card>
+    </>
+  )
+}
+const bth = 'border border-gray-500 px-2 py-1 font-semibold'
+const btd = 'border border-gray-400 px-2 py-1 align-top'
+
+function RangeBox({ from, to }) {
+  return (
+    <table className="w-full border-collapse mb-2">
+      <tbody>
+        <tr><td className={`${bth} text-center`}>Date From</td></tr>
+        <tr><td className={`${btd} text-center`}>{from || '…'} <b>To</b> {to || '…'}</td></tr>
+      </tbody>
+    </table>
+  )
+}
+
+function useRangeFilter(initial) {
+  const [f, setF] = useState(initial)
+  const [a, setA] = useState(initial)
+  const filters = (
+    <>
+      <Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field>
+      <Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
+      <Button onClick={() => setA(f)}><Search size={15} /> Search</Button>
+    </>
+  )
+  return [a, filters]
+}
+
+const BOOK_HEAD = ['SL', 'DATE', 'V.ID', 'PARTICULARS', 'DESCRIPTION', 'DEBIT', 'CREDIT', 'BALANCE', 'ENTRY BY']
+
+// One account's rows: opening balance, entries (credit = money in, debit = money out), total
+function BookRows({ flows, from, to, totalLabel = 'TOTAL', title }) {
+  const opening = flows.filter((x) => from && x.date < from).reduce((acc, x) => acc + x.in - x.out, 0)
+  const rows = flows.filter((x) => inRange(x.date, from, to))
+  let bal = opening
+  const out = rows.reduce((acc, x) => acc + x.out, 0)
+  const inn = rows.reduce((acc, x) => acc + x.in, 0)
+  return {
+    closing: opening + inn - out,
+    body: (
+      <>
+        {title && <tr><td colSpan={7} className={`${btd} font-bold`}>{title}</td><td className={btd} /><td className={btd} /></tr>}
+        <tr><td colSpan={7} className={`${btd} text-right font-semibold`}>Opening Balance</td><td className={`${btd} text-right font-semibold`}>{n0(opening)}</td><td className={btd} /></tr>
+        {rows.map((x, i) => {
+          bal += x.in - x.out
+          return (
+            <tr key={x.id}>
+              <td className={btd}>{i + 1}</td><td className={`${btd} whitespace-nowrap`}>{displayDate(x.date)}</td><td className={`${btd} whitespace-nowrap`}>{x.vid}</td>
+              <td className={`${btd} text-center font-semibold`}>{x.particulars}{x.note && <div className="font-normal text-gray-600">{x.note}</div>}</td>
+              <td className={btd}><Desc f={x} /></td>
+              <td className={`${btd} text-right`}>{n0(x.out)}</td><td className={`${btd} text-right`}>{n0(x.in)}</td>
+              <td className={`${btd} text-right`}>{n0(bal)}</td><td className={btd}>{x.entryBy}</td>
+            </tr>
+          )
+        })}
+        <tr className="font-bold">
+          <td colSpan={5} className={`${btd} text-right`}>{totalLabel}</td>
+          <td className={`${btd} text-right`}>{n0(out)}</td><td className={`${btd} text-right`}>{n0(inn)}</td>
+          <td className={`${btd} text-right`}>{n0(opening + inn - out)}</td><td className={btd} />
+        </tr>
+      </>
+    ),
+  }
 }
 
 export function BookReport({ bank }) {
   const s = useDb()
-  const [range, setRange] = useRange()
-  const all = cashFlows(s).filter((f) => (bank ? f.method !== 'Cash' : f.method === 'Cash'))
-  const opening = sum(all.filter((f) => f.date < range.from), (f) => f.in - f.out)
-  let bal = opening
-  const rows = all.filter((f) => inRange(f.date, range.from, range.to)).map((f) => ({ ...f, balance: (bal += f.in - f.out) }))
-  const columns = [
-    { key: 'date', label: 'Date', render: (r) => displayDate(r.date) }, { key: 'desc', label: 'Description' }, { key: 'method', label: 'Account' },
-    { key: 'in', label: 'Debit (In)', align: 'right', render: (r) => (r.in ? money(r.in) : '') },
-    { key: 'out', label: 'Credit (Out)', align: 'right', render: (r) => (r.out ? money(r.out) : '') },
-    { key: 'balance', label: 'Balance', align: 'right', render: (r) => money(r.balance) },
-  ]
+  const [a, filters] = useRangeFilter({ from: monthStart(), to: today() })
+  const all = cashFlows(s)
+  const title = bank ? 'Bank Book' : 'Cash Book'
+  let body
+  if (!bank) {
+    body = BookRows({ flows: all.filter((x) => x.method === 'Cash'), from: a.from, to: a.to }).body
+  } else {
+    const accounts = [...new Set([...PAYMENT_METHODS.filter((m) => m !== 'Cash'), ...all.map((x) => x.method).filter((m) => m !== 'Cash')])]
+    const parts = accounts.map((acc) => ({ acc, ...BookRows({ flows: all.filter((x) => x.method === acc), from: a.from, to: a.to, title: `${SHOP.name} (${acc.toUpperCase()})`, totalLabel: 'SUB TOTAL' }) }))
+    body = (
+      <>
+        {parts.map((p) => <Fragment key={p.acc}>{p.body}</Fragment>)}
+        <tr className="font-bold">
+          <td colSpan={7} className={`${btd} text-right`}>GRAND TOTAL</td>
+          <td className={`${btd} text-right`}>{n0(parts.reduce((acc, p) => acc + p.closing, 0))}</td><td className={btd} />
+        </tr>
+      </>
+    )
+  }
   return (
-    <ReportShell title={bank ? 'Bank Book' : 'Cash Book'} filters={<DateFilter value={range} onApply={setRange} />}>
-      <p className="text-[13px] mb-2">Opening Balance: <b>{money(opening)}</b></p>
-      <DataTable columns={columns} rows={rows} searchable={false} />
-      <p className="text-[13px] mt-2 text-right">Closing Balance: <b>{money(bal)}</b></p>
-    </ReportShell>
+    <BookShell title={title} filters={filters}>
+      <RangeBox from={a.from} to={a.to} />
+      <table className="w-full min-w-[900px] border-collapse">
+        <thead><tr>{BOOK_HEAD.map((h) => <th key={h} className={`${bth} text-center`}>{h}</th>)}</tr></thead>
+        <tbody>{body}</tbody>
+      </table>
+      <p className="text-[10px] text-gray-500 mt-2">Credit = money in, Debit = money out.{bank && ' Each payment method other than Cash is shown as its own account.'}</p>
+    </BookShell>
   )
 }
 
@@ -477,31 +597,45 @@ export function CurrentBalance() {
   )
 }
 
+// Daily Report: everything received and everything paid on one day, side by side
 export function DailyReport() {
   const s = useDb()
   const [date, setDate] = useState(today())
-  const on = (arr) => arr.filter((x) => x.date === date)
-  const flows = cashFlows(s).filter((f) => f.date === date)
-  const lines = [
-    ['Total Sales', sum(on(s.sales), 'invoiceAmount')],
-    ['Cash Received From Sales', sum(on(s.sales), 'paid')],
-    ['Sales Due', sum(on(s.sales), 'due')],
-    ['Collection From Customers', sum(on(s.payments).filter((p) => p.type === 'receive'), 'amount')],
-    ['Sales Return', sum(on(s.salesReturns), 'invoiceAmount')],
-    ['Total Purchase', sum(on(s.purchases), 'invoiceAmount')],
-    ['Paid To Suppliers', sum(on(s.payments).filter((p) => p.type === 'pay'), 'amount') + sum(on(s.purchases), 'paid')],
-    ['Expenses', sum(on(s.expenses), 'amount')],
-    ['Other Income', sum(on(s.incomes), 'amount')],
-    ['Total In', sum(flows, 'in')],
-    ['Total Out', sum(flows, 'out')],
-    ['Net Cash Flow', sum(flows, (f) => f.in - f.out)],
-  ]
+  const day = cashFlows(s).filter((x) => x.date === date && !x.transfer)
+  const ins = day.filter((x) => x.in > 0)
+  const outs = day.filter((x) => x.out > 0)
+  const len = Math.max(ins.length, outs.length, 1)
+  const side = (x, i, field) => (x
+    ? <>
+      <td className={`${btd} text-center`}>{i + 1}</td>
+      <td className={btd}>{x.name} <b>{x.daily}</b>{x.vid && <span className="text-gray-500"> ({x.vid})</span>}{x.method !== 'Cash' && <span className="text-gray-500"> · {x.method}</span>}</td>
+      <td className={btd}>{x.note}</td>
+      <td className={`${btd} text-right text-[13px]`}>{n0(x[field])}</td>
+    </>
+    : <><td className={`${btd} text-center`}>{i + 1}</td><td className={btd} /><td className={btd} /><td className={btd} /></>)
+  const tIn = sum(ins, 'in')
+  const tOut = sum(outs, 'out')
   return (
-    <ReportShell title="Daily Report" filters={<Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>}>
-      <table className="w-full max-w-xl mx-auto text-[13px] border">
-        <tbody>{lines.map(([k, v]) => <tr key={k} className="border-t"><td className="px-3 py-2">{k}</td><td className="px-3 py-2 text-right font-medium">{money(v)}</td></tr>)}</tbody>
+    <BookShell title="Daily Report" filters={<Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>}>
+      <table className="w-full border-collapse mb-2"><tbody><tr><td className={`${bth} text-center text-[14px]`}>Date : {displayDate(date)}</td></tr></tbody></table>
+      <table className="w-full min-w-[820px] border-collapse">
+        <thead>
+          <tr><th colSpan={4} className={`${bth} text-[15px]`}>Income/Receive</th><th colSpan={4} className={`${bth} text-[15px]`}>Expense/Paid</th></tr>
+          <tr>{['SL', 'Description', 'Note', 'Total', 'SL', 'Description', 'Note', 'Total'].map((h, i) => <th key={i} className={`${bth} ${h === 'Description' ? 'w-[24%]' : ''}`}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: len }, (_, i) => <tr key={i}>{side(ins[i], i, 'in')}{side(outs[i], i, 'out')}</tr>)}
+          <tr className="font-bold text-[14px]">
+            <td colSpan={3} className={`${btd} text-right`}>Total</td><td className={`${btd} text-right`}>{n0(tIn)}</td>
+            <td colSpan={3} className={`${btd} text-right`}>Total</td><td className={`${btd} text-right`}>{n0(tOut)}</td>
+          </tr>
+          <tr className="font-semibold">
+            <td colSpan={7} className={`${btd} text-right`}>Net (Receive − Paid)</td><td className={`${btd} text-right`}>{n0(tIn - tOut)}</td>
+          </tr>
+        </tbody>
       </table>
-    </ReportShell>
+      <p className="text-[10px] text-gray-500 mt-2">All payment methods are included. Balance transfers between accounts are left out.</p>
+    </BookShell>
   )
 }
 
@@ -544,46 +678,135 @@ export function LedgerReport({ supplier }) {
     )}>
       <DataTable columns={columns} rows={rows} pageSizes={[100, 250, 500]}
         footer={rows.length > 0 && <tr className="border-t"><td colSpan={4} className="px-3 py-2 text-right">Total</td><td className="px-3 py-2 text-right">{money(sum(rows, 'balance'))}</td><td /></tr>} />
-      <Modal open={!!view} onClose={() => setView(null)} title={`Ledger - ${view?.name}`} wide>
+      <Modal open={!!view} onClose={() => setView(null)} title={`Ledger - ${view?.name}`} wide="xl">
         {view && <ContactLedger contact={view} />}
       </Modal>
     </ReportShell>
   )
 }
 
+// Customer / Supplier Ledger Details: every transaction with its item lines.
+// Debit raises the balance (what they owe the shop, or what the shop owes a
+// supplier); credit lowers it. The closing balance matches the ledger list.
+function ledgerEntries(contact, s) {
+  const sup = contact.type === 'supplier'
+  const mine = (x) => x.contactId === contact.id
+  const through = (d) => [...new Set((d.payments || []).map((p) => p.method))].join(', ')
+  const e = []
+  const push = (x) => e.push({ note: '', trans: '', through: '', items: null, disc: 0, ship: 0, debit: 0, credit: 0, ...x })
+  ;(sup ? s.purchases : s.sales).filter(mine).forEach((d) => {
+    push({ date: d.date, at: d.createdAt, details: sup ? 'Purchase of Items' : 'Sales of Items', trans: d.number, note: d.note, items: d.items, disc: num(d.discount), ship: num(d.laborCost), debit: num(d.invoiceAmount) })
+    const paid = num(d.invoiceAmount) - num(d.due)
+    if (paid) push({ date: d.date, at: d.createdAt, details: sup ? 'Payment Paid' : 'Payment Received', trans: d.number, through: through(d), credit: paid })
+  })
+  ;(sup ? s.purchaseReturns : s.salesReturns).filter(mine).forEach((d) => {
+    push({ date: d.date, at: d.createdAt, details: d.sourceId ? `${sup ? 'Purchase' : 'Sales'} Return${d.sourceNumber ? ` (${d.sourceNumber})` : ''}` : 'Direct Return', trans: d.number, note: d.note, items: d.items, disc: num(d.less ?? d.discount), credit: num(d.invoiceAmount) })
+    if (num(d.paid)) push({ date: d.date, at: d.createdAt, details: sup ? 'Return Money Received' : 'Return Money Paid', trans: d.number, through: through(d), debit: num(d.paid) })
+  })
+  s.payments.filter((p) => mine(p) && p.type === (sup ? 'pay' : 'receive')).forEach((p) => {
+    push({ date: p.date, at: p.createdAt, details: sup ? 'Previous Due Paid' : 'Previous Due Collection', trans: p.number, note: p.note, through: p.method, credit: num(p.amount) })
+    if (num(p.discount)) push({ date: p.date, at: p.createdAt, details: 'Discount', trans: p.number, credit: num(p.discount) })
+  })
+  s.settlements.filter(mine).forEach((x) => push(x.refund
+    ? { date: x.date, at: x.createdAt, details: sup ? 'Advance Received Back' : 'Advance Returned', trans: x.number, note: x.note, through: x.method, debit: num(x.amount) }
+    : { date: x.date, at: x.createdAt, details: 'Settlement', trans: x.number, note: x.note, credit: num(x.amount) }))
+  return e.sort((a, b) => a.date.localeCompare(b.date) || String(a.at || '').localeCompare(String(b.at || '')))
+}
+
 function ContactLedger({ contact }) {
   const s = useDb()
   const sup = contact.type === 'supplier'
-  const entries = useMemo(() => {
-    const e = []
-    ;(sup ? s.purchases : s.sales).filter((d) => d.contactId === contact.id).forEach((d) => {
-      e.push({ date: d.date, desc: `${sup ? 'Purchase' : 'Sale'} ${d.number}`, debit: d.invoiceAmount, credit: 0 })
-      if (d.paid) e.push({ date: d.date, desc: `Paid on ${d.number}`, debit: 0, credit: d.paid })
-    })
-    ;(sup ? s.purchaseReturns : s.salesReturns).filter((d) => d.contactId === contact.id).forEach((d) => {
-      e.push({ date: d.date, desc: `Return ${d.number}`, debit: 0, credit: d.invoiceAmount })
-      if (d.paid) e.push({ date: d.date, desc: `Return paid on ${d.number}`, debit: d.paid, credit: 0 })
-    })
-    s.payments.filter((p) => p.contactId === contact.id).forEach((p) => {
-      e.push({ date: p.date, desc: `Payment ${p.number || ''}`, debit: 0, credit: Number(p.amount) })
-      if (Number(p.discount)) e.push({ date: p.date, desc: `Discount on ${p.number || 'payment'}`, debit: 0, credit: Number(p.discount) })
-    })
-    s.settlements.filter((p) => p.contactId === contact.id).forEach((p) => e.push(p.refund
-      ? { date: p.date, desc: `Advance settled ${p.number || ''}`, debit: Number(p.amount), credit: 0 }
-      : { date: p.date, desc: 'Settlement (write-off)', debit: 0, credit: Number(p.amount) }))
-    e.sort((a, b) => a.date.localeCompare(b.date))
-    let bal = Number(contact.openingBalance || 0)
-    return [{ date: '', desc: 'Opening Balance', debit: 0, credit: 0, balance: bal }, ...e.map((x) => ({ ...x, balance: (bal += x.debit - x.credit) }))]
-  }, [s, contact, sup])
+  const word = sup ? 'Supplier' : 'Customer'
+  const [f, setF] = useState({ from: '', to: today() })
+  const [a, setA] = useState(f)
+  const all = useMemo(() => ledgerEntries(contact, s), [contact, s])
+  const openingAmt = num(contact.openingBalance)
+  const before = all.filter((x) => a.from && x.date < a.from).reduce((acc, x) => acc + x.debit - x.credit, 0)
+  const rows = all.filter((x) => inRange(x.date, a.from, a.to))
+  // the contact's opening balance is its own first line when the range starts at the beginning
+  const showOpeningLine = !a.from && openingAmt !== 0
+  let bal = a.from ? openingAmt + before : 0
+  const startBal = bal
+  const cell = 'border border-gray-400 px-1.5 py-1 align-top'
+  const head = 'border border-gray-500 px-1.5 py-1 font-semibold'
+  const plain = (x) => (
+    <>
+      <td className={cell} colSpan={5} />
+      <td className={`${cell} text-center`}>{x.disc ? n0(x.disc) : ''}</td>
+      <td className={`${cell} text-center`}>{x.ship ? n0(x.ship) : ''}</td>
+    </>
+  )
+  const line = (x, key) => {
+    bal += x.debit - x.credit
+    const items = x.items?.length ? x.items : null
+    const span = items ? items.length : 1
+    const first = items?.[0]
+    const itemCells = (it) => {
+      const tp = num(it.qty) * num(it.rate)
+      return (
+        <>
+          <td className={cell}>{[it.code, it.name].filter(Boolean).join(' - ')}</td>
+          <td className={`${cell} text-right`}>{round2(it.qty)}</td>
+          <td className={`${cell} text-right`}>{round2(it.rate)}</td>
+          <td className={`${cell} text-right`}>{round2(num(it.total))}</td>
+          <td className={`${cell} text-right`}>{round2(tp - num(it.total))}</td>
+        </>
+      )
+    }
+    const rs = (content, cls = '') => <td rowSpan={span} className={`${cell} ${cls}`}>{content}</td>
+    return [
+      <tr key={key}>
+        {rs(displayDate(x.date), 'whitespace-nowrap')}
+        {rs(x.details, 'text-center')}
+        {rs(x.trans, 'text-center whitespace-nowrap')}
+        {rs(x.note)}
+        {items ? <>{itemCells(first)}{rs(n0(x.disc), 'text-center')}{rs(x.ship ? n0(x.ship) : '', 'text-center')}</> : plain(x)}
+        {rs(x.through, 'text-center')}
+        {rs(n0(x.debit), 'text-right')}
+        {rs(n0(x.credit), 'text-right')}
+        {rs(n0(bal), 'text-right')}
+      </tr>,
+      ...(items ? items.slice(1).map((it, i) => <tr key={`${key}-${i}`}>{itemCells(it)}</tr>) : []),
+    ]
+  }
   return (
-    <div className="print-area">
-      <h3 className="text-center font-semibold mb-1">{SHOP.name}</h3>
-      <p className="text-center text-[13px] mb-3">Ledger of {contact.name} ({contact.phone})</p>
-      <table className="w-full text-[13px] border">
-        <thead className="bg-gray-50"><tr><th className="px-2 py-1.5 text-left">Date</th><th className="px-2 py-1.5 text-left">Description</th><th className="px-2 py-1.5 text-right">Debit</th><th className="px-2 py-1.5 text-right">Credit</th><th className="px-2 py-1.5 text-right">Balance</th></tr></thead>
-        <tbody>{entries.map((x, i) => <tr key={i} className="border-t"><td className="px-2 py-1.5">{displayDate(x.date)}</td><td className="px-2 py-1.5">{x.desc}</td><td className="px-2 py-1.5 text-right">{x.debit ? money(x.debit) : ''}</td><td className="px-2 py-1.5 text-right">{x.credit ? money(x.credit) : ''}</td><td className="px-2 py-1.5 text-right">{money(x.balance)}</td></tr>)}</tbody>
-      </table>
-      <div className="flex justify-end mt-3 print:hidden"><Button onClick={() => window.print()}><Printer size={15} /> Print</Button></div>
+    <div>
+      <div className="flex flex-wrap gap-3 items-end mb-4 print:hidden">
+        <Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field>
+        <Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
+        <Button onClick={() => setA(f)}><Search size={15} /> Search</Button>
+        <Button color="success" onClick={() => window.print()}><Printer size={15} /> Print</Button>
+      </div>
+      <div className="print-area text-[11px] text-gray-800">
+        <PrintHead />
+        <h3 className="text-center font-semibold text-[15px] border-y py-2 mb-3">{word} Ledger Details</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse mb-2">
+            <thead><tr><th className={head}>Date From</th><th className={head}>{word} Name</th><th className={head}>{word} Phone</th></tr></thead>
+            <tbody><tr className="text-center">
+              <td className={cell}>{displayDate(a.from) || 'Beginning'} <b>To</b> {displayDate(a.to) || 'Today'}</td>
+              <td className={cell}>{contact.name}</td><td className={cell}>{contact.phone}</td>
+            </tr></tbody>
+          </table>
+          <table className="w-full min-w-[980px] border-collapse">
+            <thead>
+              <tr>
+                {['Date', 'Details', 'Trans#', 'Note'].map((h) => <th key={h} rowSpan={2} className={head}>{h}</th>)}
+                <th colSpan={5} className={head}>Description</th>
+                {['Total Amount Dis.', 'Ship/Cost', 'Paid Through', 'Debit', 'Credit', 'Balance'].map((h) => <th key={h} rowSpan={2} className={head}>{h}</th>)}
+              </tr>
+              <tr>{['Item Name', 'Qty.', 'U/Price', 'T/Price', 'Dis.'].map((h) => <th key={h} className={head}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              <tr><td colSpan={14} className={`${cell} text-right font-semibold`}>Opening Balance</td><td className={`${cell} text-right font-semibold`}>{n0(startBal)}</td></tr>
+              {showOpeningLine && line({ date: '', details: 'Opening Balance', trans: '', note: `${word} Opening Balance`, through: '', disc: 0, ship: 0, debit: openingAmt > 0 ? openingAmt : 0, credit: openingAmt < 0 ? -openingAmt : 0 }, 'opening')}
+              {rows.flatMap((x, i) => line(x, i))}
+              {!rows.length && !showOpeningLine && <tr><td colSpan={15} className={`${cell} text-center text-gray-500 py-3`}>No transactions in this period.</td></tr>}
+              <tr className="font-bold"><td colSpan={14} className={`${cell} text-right`}>TOTAL</td><td className={`${cell} text-right`}>{n0(bal)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
