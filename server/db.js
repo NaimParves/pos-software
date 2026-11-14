@@ -31,15 +31,9 @@ sql.exec(`
 // Every collection the app knows about (taken from the seed shape)
 export const COLLECTIONS = Object.keys(seed())
 
-// Document collections: number prefix and how saving moves stock
-export const DOCUMENTS = {
-  sales: { prefix: 'S', stock: -1 },
-  purchases: { prefix: 'P', stock: 1 },
-  salesReturns: { prefix: 'SR', stock: 1 },
-  purchaseReturns: { prefix: 'PR', stock: -1 },
-  purchaseOrders: { prefix: 'PO', stock: 0 },
-  damages: { prefix: 'D', stock: -1 },
-}
+// Document collections: number prefix and how saving moves stock (shared with the demo)
+export { DOCUMENTS } from '../src/config/documents.js'
+import { DOCUMENTS } from '../src/config/documents.js'
 
 const newId = () => Date.now().toString(36) + randomBytes(4).toString('hex')
 
@@ -113,7 +107,7 @@ export function loadSeed({ wipe = false, adminPassword }) {
       }
     }
     // Start counters after the numbers already used by the sample data
-    for (const [col, { prefix }] of Object.entries(DOCUMENTS)) q.setCounter.run(prefix, data[col].length)
+    for (const [col, { prefix }] of Object.entries(DOCUMENTS)) q.setCounter.run(prefix, (data[col] || []).length)
     q.setCounter.run('EXP', data.expenses.length)
   })
 }

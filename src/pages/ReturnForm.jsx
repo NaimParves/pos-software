@@ -1,15 +1,17 @@
 import { useMemo, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { Lock, Plus, Trash2 } from 'lucide-react'
-import { Button, Input, Select, Modal } from '../components/ui'
+import { Eye, Lock, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Button, Card, Field, Input, Select, Modal } from '../components/ui'
+import DataTable from '../components/DataTable'
 import Combo from '../components/Combo'
 import InvoicePrint from '../components/InvoicePrint'
+import { templateKindOf } from '../config/templates'
 import { toast } from '../components/Toast'
 import { db, useCollection, useDb, contactBalance } from '../store/db'
 import { useCan } from '../store/permissions'
 import { INVOICE_MODES } from '../config/invoiceModes'
 import { PAYMENT_METHODS } from '../config/shop'
-import { displayDate, money, num, round2, sftPerPiece, today } from '../utils/format'
+import { displayDate, inRange, money, num, round2, sftPerPiece, today } from '../utils/format'
 
 // Sales Return / Direct Return / Purchase Return.
 // With an invoice (sales & purchase return) the invoice's lines are shown
@@ -38,7 +40,12 @@ export default function ReturnForm({ mode }) {
   if (editId && !allow.edit) {
     return <div className="bg-white rounded shadow-sm p-6 text-[13px] text-gray-600">Your role is not allowed to edit this. Ask an admin to allow it on Set Permission.</div>
   }
-  return <ReturnEditor key={editId || sourceParam || 'new'} mode={mode} editId={editId} sourceParam={sourceParam} />
+  return (
+    <>
+      <ReturnEditor key={editId || sourceParam || 'new'} mode={mode} editId={editId} sourceParam={sourceParam} />
+      {mode !== 'directReturn' && <ReturnList mode={mode} />}
+    </>
+  )
 }
 
 function ReturnEditor({ mode, editId, sourceParam }) {
@@ -327,7 +334,7 @@ function ReturnEditor({ mode, editId, sourceParam }) {
       </div>
 
       <Modal open={!!printDoc} onClose={() => { const to = printDoc?.afterClose; setPrintDoc(null); if (to) nav(to, { replace: true }) }} title="Print" wide>
-        {printDoc && <InvoicePrint doc={printDoc} />}
+        {printDoc && <InvoicePrint doc={printDoc} kind={templateKindOf(cfg.collection, printDoc)} title={cfg.title} />}
       </Modal>
     </>
   )
@@ -339,5 +346,64 @@ function Row({ label, children }) {
       <span className="text-right font-medium">{label}</span>
       {children}
     </div>
+  )
+}
+
+// All Sales Returns / All Purchase Returns under the return form: search by
+// date and customer/supplier; the return number opens the return memo.
+function ReturnList({ mode }) {
+  const cfg = INVOICE_MODES[mode]
+  const nav = useNavigate()
+  const allow = useCan(cfg.listPath)
+  const state = useDb()
+  const isSupplier = cfg.party.includes('supplier')
+  const word = isSupplier ? 'Supplier' : 'Customer/Retailer'
+  const contacts = state.contacts.filter((c) => cfg.party.includes(c.type))
+  const [f, setF] = useState({ from: '', to: '', contactId: '' })
+  const [a, setA] = useState(f)
+  const [view, setView] = useState(null)
+  const contactOf = (d) => contacts.find((c) => c.id === d.contactId)
+  const rows = state[cfg.collection]
+    .filter((d) => (mode === 'salesReturn' ? !!d.sourceId : true))
+    .filter((d) => inRange(d.date, a.from, a.to) && (!a.contactId || d.contactId === a.contactId))
+    .map((d) => ({ ...d, phone: d.phone || contactOf(d)?.phone || '', address: d.address || contactOf(d)?.address || '' }))
+    .slice().reverse()
+  const remove = (d) => confirm(`Delete ${d.number}? Stock will be adjusted back.`) && db.removeDocument(cfg.collection, d.id)
+  const columns = [
+    { key: 'sl', label: 'SL', render: (_, i) => i + 1, sortable: false },
+    { key: 'date', label: 'Date', render: (d) => displayDate(d.date) },
+    { key: 'number', label: 'Return#', render: (d) => <button className="text-primary hover:underline" onClick={() => setView(d)}>{d.number}</button> },
+    { key: 'sourceNumber', label: 'Invoice#' },
+    { key: 'contactName', label: isSupplier ? 'Supplier' : 'Customer' },
+    { key: 'phone', label: 'Phone' },
+    { key: 'address', label: 'Address' },
+    { key: 'invoiceAmount', label: 'Return Amount', align: 'right', render: (d) => money(d.invoiceAmount) },
+    {
+      key: 'action', label: 'Action', render: (d) => (
+        <div className="flex gap-1">
+          <Button color="info" className="!px-2 !py-1" title="View" onClick={() => setView(d)}><Eye size={14} /></Button>
+          {allow.edit && mode === 'salesReturn' && <Button color="primary" className="!px-2 !py-1" title="Edit" onClick={() => { nav(`/salesreturn?edit=${d.id}`); window.scrollTo({ top: 0, behavior: 'smooth' }) }}><Pencil size={14} /></Button>}
+          {allow.delete && <Button color="danger" className="!px-2 !py-1" title="Delete" onClick={() => remove(d)}><Trash2 size={14} /></Button>}
+        </div>
+      ),
+    },
+  ]
+  return (
+    <Card title={isSupplier ? 'All Purchase Returns' : 'All Sales Returns'}>
+      <div className="flex flex-wrap gap-3 items-end mb-4">
+        <Field label="From Date"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field>
+        <Field label="To Date"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
+        <Field label={`Registered ${word}`}>
+          <Combo className="w-64" value={f.contactId} onChange={(v) => setF({ ...f, contactId: v })} placeholder="All"
+            options={[{ value: '', label: 'All' }, ...contacts.map((c) => ({ value: c.id, label: `${c.name}${c.phone ? ` - ${c.phone}` : ''}` }))]} />
+        </Field>
+        <Button className="!px-6" title="Search" onClick={() => setA(f)}><Search size={15} /></Button>
+      </div>
+      <DataTable columns={columns} rows={rows}
+        footer={rows.length > 0 && <tr className="border-t"><td colSpan={7} className="px-3 py-2 text-right">Total</td><td className="px-3 py-2 text-right">{money(rows.reduce((x, d) => x + num(d.invoiceAmount), 0))}</td><td /></tr>} />
+      <Modal open={!!view} onClose={() => setView(null)} title={view && `${cfg.title} ${view.number}`} wide>
+        {view && <InvoicePrint doc={view} kind={templateKindOf(cfg.collection, view)} title={cfg.title} />}
+      </Modal>
+    </Card>
   )
 }

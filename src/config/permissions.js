@@ -9,10 +9,10 @@ export const PERMISSION_ROLES = ['Admin', 'Manager', 'Salesman']
 
 const CONTACT_PAGES = [
   ['customer', 'Add Customer'], ['retailer', 'Add Retailer'], ['supplier', 'Add Supplier'],
-  ['employee', 'Add Employee'], ['reference', 'Add Reference'],
+  ['employee', 'Add Employee'], ['reference', 'Add Reference'], ['lender', 'Add Lender'],
 ]
 // Users and branches are admin-only anyway, so they are not listed here.
-const ADMIN_ONLY = ['users', 'branches', 'permissions']
+const ADMIN_ONLY = ['users', 'branches', 'permissions', 'templateSettings']
 
 // Every page whose list has Edit and/or Delete buttons, and the records it changes.
 // match(record) narrows a shared collection to the records that page shows.
@@ -20,13 +20,19 @@ export const ACTION_PAGES = [
   { group: 'Sales', path: '/invoices/all-sales', label: 'List of Sales', collection: 'sales' },
   { group: 'Sales', path: '/invoices/all-challan-list', label: 'List of Challans', collection: 'sales', noEdit: true },
   { group: 'Direct Return', path: '/salesreturn/direct-return', label: 'List of Return', collection: 'salesReturns' },
+  { group: 'Price Quotation', path: '/quotations/all-quotations', label: 'List Of Quotation', collection: 'quotations' },
   { group: 'Purchase', path: '/bills/all-bills', label: 'List of Purchase', collection: 'purchases' },
   { group: 'Purchase Orders', path: '/purchaseorders/all-purchase-orders', label: 'List of P/O', collection: 'purchaseOrders' },
   { group: 'Damages', path: '/damages', label: 'All Damages', collection: 'damages' },
   { group: 'Product', path: '/products', label: 'Add Product', collection: 'products' },
   { group: 'Product', path: '/products/add-opening-stock', label: 'Bulk Opening Stock', collection: 'products', noDelete: true },
-  { group: 'Accounts', path: '/payments/receive', label: 'Receive From Customer', collection: 'payments', match: (r) => r.type === 'receive' },
-  { group: 'Accounts', path: '/payments/pay', label: 'Pay To Supplier', collection: 'payments', match: (r) => r.type === 'pay' },
+  { group: 'Product', path: '/products/stock-in-out', label: 'Product Stock In Out', collection: 'stockAdjustments', noEdit: true },
+  { group: 'Accounts', path: '/payments/receive', label: 'Receive From Customer', collection: 'payments', match: (r) => r.type === 'receive' && !r.advance },
+  { group: 'Accounts', path: '/payments/pay', label: 'Pay To Supplier', collection: 'payments', match: (r) => r.type === 'pay' && !r.advance },
+  { group: 'Accounts', path: '/advances/customer', label: 'Advance from Customer', collection: 'payments', match: (r) => r.type === 'receive' && r.advance },
+  { group: 'Accounts', path: '/advances/supplier', label: 'Advance to Supplier', collection: 'payments', match: (r) => r.type === 'pay' && r.advance },
+  { group: 'Loan', path: '/loans/collection', label: 'Loan Collection', collection: 'loans', match: (r) => r.type === 'collect' },
+  { group: 'Loan', path: '/loans/payment', label: 'Loan Payment', collection: 'loans', match: (r) => r.type === 'pay' },
   { group: 'Accounts', path: '/settlements/customer', label: 'Customer Settlement', collection: 'settlements', match: (r) => r.kind === 'customer' },
   { group: 'Accounts', path: '/settlements/supplier', label: 'Supplier Settlement', collection: 'settlements', match: (r) => r.kind === 'supplier' },
   ...CONTACT_PAGES.map(([type, label]) => ({

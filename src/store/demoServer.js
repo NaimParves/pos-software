@@ -2,25 +2,17 @@
 // same /api requests inside the browser. Data starts from the sample data and
 // is kept in this browser's localStorage only. Mirrors server/index.js.
 import { seed } from './seed'
+import { DOCUMENTS, stockSign, refreshLinks, checkLink } from '../config/documents'
 
 const KEY = 'pos-demo-db'
 export const DEMO_LOGIN = { phone: 'admin', password: 'admin123' }
-
-const DOCUMENTS = {
-  sales: { prefix: 'S', stock: -1 },
-  purchases: { prefix: 'P', stock: 1 },
-  salesReturns: { prefix: 'SR', stock: 1 },
-  purchaseReturns: { prefix: 'PR', stock: -1 },
-  purchaseOrders: { prefix: 'PO', stock: 0 },
-  damages: { prefix: 'D', stock: -1 },
-}
 
 function fresh() {
   const data = seed()
   const now = new Date().toISOString()
   for (const rows of Object.values(data)) rows.forEach((r) => { r.createdAt = now })
   const counters = { EXP: data.expenses.length }
-  for (const [col, { prefix }] of Object.entries(DOCUMENTS)) counters[prefix] = data[col].length
+  for (const [col, { prefix }] of Object.entries(DOCUMENTS)) counters[prefix] = (data[col] || []).length
   return { data, counters, password: DEMO_LOGIN.password }
 }
 
@@ -66,14 +58,7 @@ function adjustStock(items, sign) {
   return [...touched.values()].map((p) => update('products', p.id, { stock: p.stock }))
 }
 
-// A purchase made from a P/O ("Order Receive") marks that P/O as received
-function linkPurchaseOrder(purchase, receivedId) {
-  if (!purchase.purchaseOrderId || !get('purchaseOrders', purchase.purchaseOrderId)) return []
-  const patch = receivedId
-    ? { received: true, receivedPurchaseId: receivedId, receivedPurchaseNumber: purchase.number }
-    : { received: false, receivedPurchaseId: '', receivedPurchaseNumber: '' }
-  return [update('purchaseOrders', purchase.purchaseOrderId, patch)]
-}
+const linkDb = { all: (c) => all(c), get: (c, id) => get(c, id), update: (c, id, patch) => update(c, id, patch) }
 
 function checkItems(items) {
   if (!items.length) throw fail(400, 'Add at least one product')
@@ -113,30 +98,30 @@ function handle(method, path, body, query) {
       const doc = sanitize(body)
       checkItems(Array.isArray(doc.items) ? doc.items : [])
       if (col !== 'purchases') delete doc.purchaseOrderId
-      if (doc.purchaseOrderId) {
-        const po = get('purchaseOrders', doc.purchaseOrderId)
-        if (!po) throw fail(400, 'That purchase order no longer exists')
-        if (po.receivedPurchaseId && get('purchases', po.receivedPurchaseId)) throw fail(400, `${po.number} was already received as ${po.receivedPurchaseNumber}`)
-      }
+      if (col !== 'sales') delete doc.quotationId
+      const linkError = checkLink(col, doc, linkDb)
+      if (linkError) throw fail(400, linkError)
       const rec = insert(col, { ...doc, number: nextNumber(cfg.prefix), createdBy: 'Admin' })
-      return { doc: rec, products: cfg.stock ? adjustStock(rec.items, cfg.stock) : [], purchaseOrders: linkPurchaseOrder(rec, rec.id) }
+      const sign = stockSign(cfg, rec)
+      return { doc: rec, products: sign ? adjustStock(rec.items, sign) : [], ...refreshLinks(col, [rec], linkDb) }
     }
     const old = get(col, id)
     if (!old) throw fail(404, 'Not found')
     if (method === 'PUT') {
-      const { number, createdBy, purchaseOrderId, ...doc } = sanitize(body)
+      const { number, createdBy, purchaseOrderId, quotationId, ...doc } = sanitize(body)
       checkItems(Array.isArray(doc.items) ? doc.items : [])
       const touched = new Map()
-      if (cfg.stock) {
-        adjustStock(old.items || [], -cfg.stock).forEach((p) => touched.set(p.id, p))
-        adjustStock(doc.items, cfg.stock).forEach((p) => touched.set(p.id, p))
-      }
-      const rec = update(col, id, { ...doc, number: old.number, createdBy: old.createdBy, purchaseOrderId: old.purchaseOrderId || '', updatedBy: 'Admin', updatedAt: new Date().toISOString() })
-      return { doc: rec, products: [...touched.values()] }
+      const before = stockSign(cfg, old)
+      const after = stockSign(cfg, doc)
+      if (before) adjustStock(old.items || [], -before).forEach((p) => touched.set(p.id, p))
+      if (after) adjustStock(doc.items, after).forEach((p) => touched.set(p.id, p))
+      const rec = update(col, id, { ...doc, number: old.number, createdBy: old.createdBy, purchaseOrderId: old.purchaseOrderId || '', quotationId: old.quotationId || '', updatedBy: 'Admin', updatedAt: new Date().toISOString() })
+      return { doc: rec, products: [...touched.values()], ...refreshLinks(col, [rec], linkDb) }
     }
     if (method === 'DELETE') {
       db.data[col] = all(col).filter((r) => r.id !== id)
-      return { ok: true, products: cfg.stock ? adjustStock(old.items, -cfg.stock) : [], purchaseOrders: col === 'purchases' ? linkPurchaseOrder(old, null) : [] }
+      const sign = stockSign(cfg, old)
+      return { ok: true, products: sign ? adjustStock(old.items, -sign) : [], ...refreshLinks(col, [old], linkDb) }
     }
   }
 

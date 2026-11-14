@@ -71,18 +71,19 @@ export const seed = () => ({
   payments: [],
   settlements: [],
   accountHeads: [
-    { id: 'a1', name: 'Shop Rent', type: 'Expense' },
-    { id: 'a2', name: 'Electricity Bill', type: 'Expense' },
-    { id: 'a3', name: 'Transport / Labour', type: 'Expense' },
-    { id: 'a4', name: 'Tea & Snacks', type: 'Expense' },
-    { id: 'a5', name: 'Commission Income', type: 'Income' },
-    { id: 'a6', name: 'Other Income', type: 'Income' },
+    { id: 'a1', name: 'Shop Rent', type: 'Expense', subType: 'General Expense', status: 'Active' },
+    { id: 'a2', name: 'Electricity Bill', type: 'Expense', subType: 'General Expense', status: 'Active' },
+    { id: 'a3', name: 'Transport / Labour', type: 'Expense', subType: 'Purchase Related Expense', status: 'Active' },
+    { id: 'a4', name: 'Tea & Snacks', type: 'Expense', subType: 'Others Expense', status: 'Active' },
+    { id: 'a5', name: 'Commission Income', type: 'Income', subType: 'Sales Related Income', status: 'Active' },
+    { id: 'a6', name: 'Other Income', type: 'Income', subType: 'Others Income', status: 'Active' },
   ],
   branches: [{ id: 'br1', name: 'Main Branch', address: 'Main Road', phone: '' }],
   users: [{ id: 'us1', name: 'Admin', phone: 'admin', role: 'Super Admin', branch: 'Main Branch', status: 'Active' }],
   messages: [], phoneBook: [], sentMessages: [], permissions: [],
   attendance: [], leaves: [], salarySheets: [], paySlips: [],
   salaryGrades: [], salaryStatements: [], holidays: [], shifts: [],
+  quotations: [], loans: [], stockAdjustments: [], templateSettings: [],
 })
 
 function mkInvoice(id, number, date, contactId, contactName, items, paid) {

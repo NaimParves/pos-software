@@ -11,6 +11,7 @@ const COLLECTIONS = [
   'expenses', 'incomes', 'transfers', 'payments', 'settlements', 'accountHeads', 'branches', 'users',
   'messages', 'phoneBook', 'sentMessages', 'permissions', 'attendance', 'leaves', 'salarySheets',
   'paySlips', 'salaryGrades', 'salaryStatements', 'holidays', 'shifts',
+  'quotations', 'loans', 'stockAdjustments', 'templateSettings',
 ]
 const empty = () => Object.fromEntries(COLLECTIONS.map((c) => [c, []]))
 
@@ -86,6 +87,7 @@ export const db = {
     set(name, [...state[name], res.doc])
     merge('products', res.products)
     merge('purchaseOrders', res.purchaseOrders || [])
+    merge('quotations', res.quotations || [])
     return res.doc
   }),
 
@@ -94,6 +96,8 @@ export const db = {
     const res = await api(`/documents/${name}/${id}`, { method: 'PUT', body: doc })
     merge(name, [res.doc])
     merge('products', res.products)
+    merge('purchaseOrders', res.purchaseOrders || [])
+    merge('quotations', res.quotations || [])
     return res.doc
   }),
 
@@ -102,6 +106,7 @@ export const db = {
     set(name, state[name].filter((r) => r.id !== id))
     merge('products', res.products)
     merge('purchaseOrders', res.purchaseOrders || [])
+    merge('quotations', res.quotations || [])
     return true
   }),
 
@@ -149,4 +154,14 @@ export function contactSummary(contact, s = state) {
 // Balance owed by a customer (positive) or owed to a supplier (positive).
 export function contactBalance(contact, s = state) {
   return contactSummary(contact, s).balance
+}
+
+// A lender's loan: billed = loans collected, received = repaid, balance = still owed
+export function loanSummary(contact, s = state) {
+  if (!contact) return { billed: 0, received: 0, balance: 0 }
+  const mine = (s.loans || []).filter((x) => x.contactId === contact.id)
+  const taken = mine.filter((x) => x.type === 'collect').reduce((a, x) => a + Number(x.amount || 0), 0)
+  const repaid = mine.filter((x) => x.type === 'pay').reduce((a, x) => a + Number(x.amount || 0), 0)
+  const r2 = (v) => Math.round(v * 100) / 100
+  return { billed: r2(taken), received: r2(repaid), balance: r2(taken - repaid) }
 }

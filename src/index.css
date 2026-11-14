@@ -9,10 +9,29 @@ input[type='number']::-webkit-inner-spin-button { opacity: 0.4; }
 
 .invoice-a4 { max-width: 210mm; }
 
+/* Printing: only the .print-area is printed, laid out to fit the paper
+   (A4 by default, or the branch's paper size). Everything that is not the
+   print area or one of its parents is removed, so nothing is cut off and no
+   blank pages follow. When a pop-up (modal) holds a print area, only that one
+   is printed. */
 @media print {
-  @page { size: A4; margin: 8mm; }
-  .print-area { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body * { visibility: hidden; }
-  .print-area, .print-area * { visibility: visible; }
-  .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+  @page { size: A4 portrait; margin: 8mm; }
+  html, body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
+  body *:not(:has(.print-area)):not(.print-area):not(.print-area *) { display: none !important; }
+  body *:has(.print-area) {
+    display: block !important; position: static !important; overflow: visible !important; height: auto !important;
+    min-height: 0 !important; max-height: none !important; width: auto !important; max-width: none !important;
+    margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; background: #fff !important;
+    transform: none !important;
+  }
+  body:has(.modal-root .print-area) .print-area:not(.modal-root .print-area) { display: none !important; }
+  .print-area { -webkit-print-color-adjust: exact; print-color-adjust: exact; width: 100% !important; max-width: 100% !important; margin: 0 !important; }
+  .print-area .overflow-x-auto, .print-area .overflow-auto, .print-area .overflow-hidden { overflow: visible !important; }
+  .print-area [class*="min-w-"] { min-width: 0 !important; }
+  .print-area table { width: 100% !important; max-width: 100% !important; border-collapse: collapse; }
+  .print-area th, .print-area td { overflow-wrap: anywhere; }
+  .print-area thead { display: table-header-group; }
+  .print-area tfoot { display: table-footer-group; }
+  .print-area tr, .print-area img { break-inside: avoid; }
+  .print-area.report-print { font-size: 10px; }
 }

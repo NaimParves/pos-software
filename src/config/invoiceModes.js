@@ -3,11 +3,15 @@
 export const INVOICE_MODES = {
   sale: {
     title: 'Sales', collection: 'sales', prefix: 'S', party: ['customer', 'retailer'], walkIn: 'Walk-In Customer',
-    stock: -1, payments: true, labor: true, reference: true, listPath: '/invoices/all-sales',
+    stock: -1, payments: true, labor: true, reference: true, challan: true, listPath: '/invoices/all-sales',
+  },
+  quotation: {
+    title: 'Create Quotation', printTitle: 'Quotation', collection: 'quotations', prefix: 'QT', party: ['customer', 'retailer'], walkIn: 'Walk-In Customer',
+    stock: 0, payments: false, labor: true, reference: true, listPath: '/quotations/all-quotations',
   },
   purchase: {
     title: 'Purchase', collection: 'purchases', prefix: 'P', party: ['supplier'], walkIn: 'Walk-In Supplier',
-    stock: 1, payments: true, listPath: '/bills/all-bills', priceKey: 'purchasePrice',
+    stock: 1, payments: true, challan: true, listPath: '/bills/all-bills', priceKey: 'purchasePrice',
   },
   salesReturn: {
     title: 'Sales Return', collection: 'salesReturns', prefix: 'SR', party: ['customer', 'retailer'], walkIn: 'Walk-In Customer',

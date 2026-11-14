@@ -1,15 +1,17 @@
 import { useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button, Input, Select, Modal, Field } from '../components/ui'
 import Combo from '../components/Combo'
 import InvoicePrint from '../components/InvoicePrint'
+import { templateKindOf } from '../config/templates'
 import { toast } from '../components/Toast'
 import { ProductForm } from './Products'
 import { carryDeliveryTicks } from '../components/Delivery'
 import { db, useCollection, useDb, contactBalance } from '../store/db'
 import { useCan } from '../store/permissions'
-import { INVOICE_MODES, LABOR_PER_CARTOON, ROUND_TOTAL } from '../config/invoiceModes'
+import { INVOICE_MODES, ROUND_TOTAL } from '../config/invoiceModes'
+import { useShop } from '../store/shop'
 import { PAYMENT_METHODS } from '../config/shop'
 import { num, round2, sftPerPiece, today, money } from '../utils/format'
 
@@ -54,22 +56,27 @@ function netPayments(rows, change) {
 }
 
 // ?edit=<id> opens a saved invoice for editing; a new key resets the form.
-// ?fromPO=<id> (purchase only) starts a purchase filled from a purchase order.
+// ?fromPO=<id> (purchase only) starts a purchase filled from a purchase order;
+// the Order Receive screen passes the ticked lines and quantities in the
+// navigation state. ?fromQuote=<id> (sale only) converts a price quotation.
 export default function InvoiceForm({ mode }) {
   const [params] = useSearchParams()
+  const { state: navState } = useLocation()
   const editId = params.get('edit') || ''
   const poId = mode === 'purchase' && !editId ? params.get('fromPO') || '' : ''
+  const quoteId = mode === 'sale' && !editId ? params.get('fromQuote') || '' : ''
   const allow = useCan(INVOICE_MODES[mode].listPath)
   if (editId && !allow.edit) {
     return <div className="bg-white rounded shadow-sm p-6 text-[13px] text-gray-600">Your role is not allowed to edit this. Ask an admin to allow it on Set Permission.</div>
   }
-  return <InvoiceEditor key={editId || poId || 'new'} mode={mode} editId={editId} poId={poId} />
+  return <InvoiceEditor key={editId || poId || quoteId || 'new'} mode={mode} editId={editId} poId={poId} quoteId={quoteId} poLines={navState?.poLines} />
 }
 
-function InvoiceEditor({ mode, editId, poId }) {
+function InvoiceEditor({ mode, editId, poId, quoteId, poLines }) {
   const cfg = INVOICE_MODES[mode]
   const nav = useNavigate()
   const state = useDb()
+  const shop = useShop()
   const products = useCollection('products')
   const contacts = useCollection('contacts')
   const parties = cfg.party ? contacts.filter((c) => cfg.party.includes(c.type)) : []
@@ -80,12 +87,26 @@ function InvoiceEditor({ mode, editId, poId }) {
   const [editDoc] = useState(() => (editId ? state[cfg.collection].find((d) => d.id === editId) || null : null))
   // Order Receive: copy the P/O's supplier, lines and totals; payments start empty
   const [poDoc] = useState(() => (poId ? state.purchaseOrders.find((d) => d.id === poId) || null : null))
+  // the lines to receive: the ones ticked on the Order Receive screen, else everything still pending
+  const poItems = poDoc ? (Array.isArray(poLines) && poLines.length
+    ? poLines.map(({ index, qty }) => ({ ...poDoc.items[index], poIndex: index, qty }))
+    : poDoc.items.map((it, i) => ({ ...it, poIndex: i, qty: round2(num(it.qty) - num(poDoc.receivedQty?.[i])) })).filter((it) => it.qty > 0)
+  ).filter((it) => it.productId) : []
   const fromPO = poDoc ? {
     contactId: poDoc.contactId, contactName: poDoc.contactName, phone: poDoc.phone, address: poDoc.address,
-    items: poDoc.items, vatType: poDoc.vatType, vatInput: poDoc.vatInput, discType: poDoc.discType, discInput: poDoc.discInput,
+    items: poItems.map((it) => recalc({ ...emptyLine(), ...it }, products.find((p) => p.id === it.productId), 'qty')),
+    vatType: poDoc.vatType, vatInput: poDoc.vatInput, discType: poDoc.discType, discInput: poDoc.discInput,
     discountNote: poDoc.discountNote, note: poDoc.note ? `${poDoc.number}: ${poDoc.note}` : `From ${poDoc.number}`,
   } : null
-  const e0 = editDoc || fromPO || {}
+  // Convert To Sale: copy the quotation's customer, lines and totals
+  const [quoteDoc] = useState(() => (quoteId ? (state.quotations || []).find((d) => d.id === quoteId) || null : null))
+  const fromQuote = quoteDoc ? {
+    contactId: quoteDoc.contactId, contactName: quoteDoc.contactName, phone: quoteDoc.phone, address: quoteDoc.address,
+    referenceId: quoteDoc.referenceId, items: quoteDoc.items, vatType: quoteDoc.vatType, vatInput: quoteDoc.vatInput,
+    discType: quoteDoc.discType, discInput: quoteDoc.discInput, discountNote: quoteDoc.discountNote,
+    autoLabor: quoteDoc.autoLabor, laborCost: quoteDoc.laborCost, note: quoteDoc.note,
+  } : null
+  const e0 = editDoc || fromPO || fromQuote || {}
   const startPays = e0.givenPayments?.length ? e0.givenPayments : e0.payments?.length ? e0.payments : [emptyPay()]
 
   const [contactId, setContactId] = useState(e0.contactId || '')
@@ -93,14 +114,15 @@ function InvoiceEditor({ mode, editId, poId }) {
   const [refId, setRefId] = useState(e0.referenceId || '')
   const [date, setDate] = useState(e0.date || today())
   const [note, setNote] = useState(e0.note || '')
+  const [challanNo, setChallanNo] = useState(e0.challanNo || '')
   const [lines, setLines] = useState(() => (e0.items?.length ? e0.items.map((it) => ({ ...emptyLine(), ...it, key: Math.random() })) : [emptyLine()]))
   const [vatType, setVatType] = useState(e0.vatType || (editDoc ? 'BDT' : '%'))
   const [vat, setVat] = useState(e0.vatInput ?? (editDoc ? e0.vat || '' : ''))
   const [discType, setDiscType] = useState(e0.discType || 'BDT')
   const [disc, setDisc] = useState(e0.discInput ?? (editDoc ? e0.discount || 0 : 0))
   const [discNote, setDiscNote] = useState(e0.discountNote || '')
-  const [autoLabor, setAutoLabor] = useState(editDoc ? e0.autoLabor ?? false : true)
-  const [labor, setLabor] = useState(editDoc ? e0.laborCost || '' : '')
+  const [autoLabor, setAutoLabor] = useState(editDoc || quoteDoc ? e0.autoLabor ?? false : true)
+  const [labor, setLabor] = useState(editDoc || quoteDoc ? e0.laborCost || '' : '')
   const [given, setGiven] = useState(editDoc ? e0.given || round2(startPays.reduce((a, p) => a + num(p.amount), 0)) : 0)
   const [sms, setSms] = useState(!!e0.sms)
   const [pays, setPays] = useState(() => startPays.map((p) => ({ ...emptyPay(), ...p })))
@@ -176,7 +198,7 @@ function InvoiceEditor({ mode, editId, poId }) {
     })
     const vatAmt = vatType === '%' ? (subTotal * num(vat)) / 100 : num(vat)
     const discAmt = discType === '%' ? (subTotal * num(disc)) / 100 : num(disc)
-    const laborAmt = cfg.labor ? (autoLabor ? cartoons * LABOR_PER_CARTOON : num(labor)) : 0
+    const laborAmt = cfg.labor ? (autoLabor ? cartoons * shop.laborPerCarton : num(labor)) : 0
     const raw = subTotal + vatAmt - discAmt + laborAmt
     const invoiceAmount = ROUND_TOTAL ? Math.round(raw) : round2(raw)
     const payable = round2(invoiceAmount + (cfg.stock !== 0 && cfg.party ? prevDue : 0)) // T/Payable
@@ -187,10 +209,10 @@ function InvoiceEditor({ mode, editId, poId }) {
     const due = round2(invoiceAmount - paid) // below 0 = part of the previous due was paid off
     return { subTotal, pieces, cartoons, sft: round2(sft), vatAmt, discAmt, laborAmt, invoiceAmount, payable, given: givenAmt, rowsTotal, change, paid, due }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, vat, vatType, disc, discType, labor, autoLabor, pays, given, prevDue, products])
+  }, [lines, vat, vatType, disc, discType, labor, autoLabor, pays, given, prevDue, products, shop.laborPerCarton])
 
   const reset = () => {
-    setContactId(''); setWalk({ name: '', address: '', phone: '' }); setRefId(''); setNote('')
+    setContactId(''); setWalk({ name: '', address: '', phone: '' }); setRefId(''); setNote(''); setChallanNo('')
     setLines([emptyLine()]); setVat(''); setDisc(0); setDiscNote(''); setLabor(''); setGiven(0); setPays([emptyPay()]); setError(''); setSms(false)
   }
 
@@ -201,9 +223,8 @@ function InvoiceEditor({ mode, editId, poId }) {
     if (cfg.payments && totals.rowsTotal !== totals.given) {
       setError(`The Paid amounts add up to ${money(totals.rowsTotal)} but Given is ${money(totals.given)}. They must be the same.`); return
     }
-    if (poDoc?.received && state.purchases.some((x) => x.id === poDoc.receivedPurchaseId)) {
-      setError(`${poDoc.number} was already received as ${poDoc.receivedPurchaseNumber}.`); return
-    }
+    if (poDoc?.receiveStatus === 'Received') { setError(`${poDoc.number} has already been received in full.`); return }
+    if (quoteDoc?.converted) { setError(`${quoteDoc.number} was already converted to sale ${quoteDoc.convertedSaleNumber}.`); return }
     if (saving) return
     setSaving(true)
     setError('')
@@ -213,8 +234,9 @@ function InvoiceEditor({ mode, editId, poId }) {
       return { ...l, name: p.name, code: p.code, size: p.size, grade: p.grade, kind: p.kind, qty: num(l.qty), rate: num(l.rate) }
     })
     const body = {
-      date, note,
+      date, note, challanNo: challanNo.trim(), noPayments: !cfg.payments,
       ...(poDoc ? { purchaseOrderId: poDoc.id } : {}),
+      ...(quoteDoc ? { quotationId: quoteDoc.id } : {}),
       contactId: contactId || '',
       contactName: contact ? contact.name : walk.name || cfg.walkIn || '',
       phone: contact ? contact.phone : walk.phone,
@@ -232,7 +254,7 @@ function InvoiceEditor({ mode, editId, poId }) {
     setSaving(false)
     if (!doc) return // error already shown
     toast.success(`${cfg.title} ${doc.number} ${editDoc ? 'updated' : 'saved'} successfully.`)
-    if (editDoc || poDoc) {
+    if (editDoc || poDoc || quoteDoc) {
       if (print) setPrintDoc({ ...doc, title: cfg.title, afterClose: cfg.listPath })
       else nav(cfg.listPath)
       return
@@ -274,6 +296,18 @@ function InvoiceEditor({ mode, editId, poId }) {
           {cfg.reference ? <Input value={editDoc ? editDoc.number : state[cfg.collection].length + 1} disabled /> : <Input value={note} onChange={(e) => setNote(e.target.value)} />}
           <span className="font-medium">Date *</span>
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          {cfg.challan && (
+            <>
+              <span className="font-medium">Challan No</span>
+              <Input placeholder="Challan Number" value={challanNo} onChange={(e) => setChallanNo(e.target.value)} />
+              {cfg.reference && (
+                <>
+                  <span className="font-medium">Note</span>
+                  <Input placeholder="Note" value={note} onChange={(e) => setNote(e.target.value)} className="md:col-span-5" />
+                </>
+              )}
+            </>
+          )}
 
           {isWalkIn && cfg.reference && (
             <>
@@ -298,6 +332,8 @@ function InvoiceEditor({ mode, editId, poId }) {
             {editDoc && <span className="self-center ml-auto font-medium text-warning">Editing {editDoc.number}</span>}
             {poDoc && <span className="self-center ml-auto font-medium text-info">Receiving purchase order {poDoc.number} — change the items if needed, then save</span>}
             {poId && !poDoc && <span className="self-center ml-auto font-medium text-danger">Purchase order not found</span>}
+            {quoteDoc && <span className="self-center ml-auto font-medium text-info">Converting quotation {quoteDoc.number} to a sale — check the items and payment, then save</span>}
+            {quoteId && !quoteDoc && <span className="self-center ml-auto font-medium text-danger">Quotation not found</span>}
           </div>
         </div>
 
@@ -350,7 +386,7 @@ function InvoiceEditor({ mode, editId, poId }) {
             <Row label="VAT">
               <div className="flex gap-1"><Select className="!w-20" value={vatType} onChange={(e) => setVatType(e.target.value)} options={['%', 'BDT']} /><Input type="number" value={vat} onChange={(e) => setVat(e.target.value)} /></div>
             </Row>
-            {mode === 'sale' && <>
+            {cfg.labor && <>
               <Row label="Total SFT"><Input value={totals.sft || ''} readOnly /></Row>
               <Row label="Total Cartoon"><Input value={totals.cartoons || ''} readOnly /></Row>
               <Row label="Auto Labor Cost"><input type="checkbox" checked={autoLabor} onChange={(e) => setAutoLabor(e.target.checked)} /></Row>
@@ -361,7 +397,7 @@ function InvoiceEditor({ mode, editId, poId }) {
               <div className="flex gap-1"><Select className="!w-20" value={discType} onChange={(e) => setDiscType(e.target.value)} options={['BDT', '%']} /><Input type="number" value={disc} onChange={(e) => setDisc(e.target.value)} /></div>
             </Row>
             <Row label="Dis. Note"><Input placeholder="Discount Note" value={discNote} onChange={(e) => setDiscNote(e.target.value)} /></Row>
-            {mode === 'sale' && <>
+            {cfg.labor && <>
               <Row label="Total PCS"><Input value={totals.pieces} readOnly /></Row>
               <Row label="Labor Cost"><Input type="number" placeholder="Labour Cost" value={autoLabor ? totals.laborAmt : labor} disabled={autoLabor} onChange={(e) => setLabor(e.target.value)} /></Row>
             </>}
@@ -422,7 +458,7 @@ function InvoiceEditor({ mode, editId, poId }) {
         {addProduct && <ProductForm compact onSaved={onProductAdded} onCancel={() => setAddProduct(false)} />}
       </Modal>
       <Modal open={!!printDoc} onClose={() => { const to = printDoc?.afterClose; setPrintDoc(null); if (to) nav(to) }} title="Print" wide>
-        {printDoc && <InvoicePrint doc={printDoc} />}
+        {printDoc && <InvoicePrint doc={printDoc} kind={templateKindOf(cfg.collection, printDoc)} title={cfg.printTitle || cfg.title} />}
       </Modal>
     </>
   )

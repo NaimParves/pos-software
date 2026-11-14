@@ -6,6 +6,7 @@ import Combo from '../components/Combo'
 import DataTable from '../components/DataTable'
 import { db, useDb, contactBalance } from '../store/db'
 import { SHOP } from '../config/shop'
+import { useShop } from '../store/shop'
 import { MENU } from '../config/menu'
 import { ACTION_PAGES, PERMISSION_ROLES, can, permissionKey } from '../config/permissions'
 import { useCan } from '../store/permissions'
@@ -26,6 +27,7 @@ function Bars({ value }) {
 
 export function BarcodePrint() {
   const s = useDb()
+  const SHOP = useShop()
   const [pid, setPid] = useState('')
   const [count, setCount] = useState(12)
   const [showPrice, setShowPrice] = useState(true)
