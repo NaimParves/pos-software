@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { store, tx, COLLECTIONS, DOCUMENTS, ensureSeeded, loadSeed, DATA_DIR } from './db.js'
 import { makeAuth, hashPassword, verifyPassword, ADMIN_ROLES } from './auth.js'
 import { canChangeRecord, DELIVERY_FIELDS } from '../src/config/permissions.js'
+import { stockSign, refreshLinks, checkLink } from '../src/config/documents.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.API_PORT) || 3001
@@ -35,7 +36,7 @@ const checkCollection = (req, res, next) =>
   COLLECTIONS.includes(req.params.col) ? next() : res.status(404).json({ error: `Unknown collection ${req.params.col}` })
 
 // Only admins may change users, branches or permissions
-const ADMIN_COLLECTIONS = ['users', 'branches', 'permissions']
+const ADMIN_COLLECTIONS = ['users', 'branches', 'permissions', 'templateSettings']
 const guardAdmin = (req, res, next) =>
   ADMIN_COLLECTIONS.includes(req.params.col) && !ADMIN_ROLES.includes(req.user.role)
     ? res.status(403).json({ error: 'Only an admin can do this' })
@@ -48,16 +49,8 @@ function allowed(req, action, col, record) {
 }
 const denied = (res, action) => res.status(403).json({ error: `Your role is not allowed to ${action} this` })
 
-// A purchase made from a P/O ("Order Receive") marks that P/O as received
-function linkPurchaseOrder(purchase, receivedId) {
-  if (!purchase.purchaseOrderId) return []
-  const po = store.get('purchaseOrders', purchase.purchaseOrderId)
-  if (!po) return []
-  const patch = receivedId
-    ? { received: true, receivedPurchaseId: receivedId, receivedPurchaseNumber: purchase.number }
-    : { received: false, receivedPurchaseId: '', receivedPurchaseNumber: '' }
-  return [store.update('purchaseOrders', po.id, patch)]
-}
+// P/O receive status and quotation "converted" status follow the purchases/sales made from them
+const linkDb = { all: (c) => store.all(c), get: (c, id) => store.get(c, id), update: (c, id, patch) => store.update(c, id, patch) }
 
 // Strip fields the client may not set directly
 function sanitize(col, body) {
@@ -117,19 +110,16 @@ app.post('/api/documents/:col', requireAuth, (req, res) => {
     if (!(Number(it.qty) > 0)) return res.status(400).json({ error: `Quantity must be more than 0 for ${it.name}` })
   }
   if (req.params.col !== 'purchases') delete body.purchaseOrderId
-  if (body.purchaseOrderId) {
-    const po = store.get('purchaseOrders', body.purchaseOrderId)
-    if (!po) return res.status(400).json({ error: 'That purchase order no longer exists' })
-    if (po.receivedPurchaseId && store.get('purchases', po.receivedPurchaseId)) {
-      return res.status(400).json({ error: `${po.number} was already received as ${po.receivedPurchaseNumber}` })
-    }
-  }
+  if (req.params.col !== 'sales') delete body.quotationId
+  const linkError = checkLink(req.params.col, body, linkDb)
+  if (linkError) return res.status(400).json({ error: linkError })
   const result = tx(() => {
     const doc = store.insert(req.params.col, {
       ...body, number: store.nextNumber(cfg.prefix), createdBy: req.user.name,
     })
-    const products = cfg.stock ? adjustStock(items, cfg.stock) : []
-    return { doc, products, purchaseOrders: linkPurchaseOrder(doc, doc.id) }
+    const sign = stockSign(cfg, doc)
+    const products = sign ? adjustStock(items, sign) : []
+    return { doc, products, ...refreshLinks(req.params.col, [doc], linkDb) }
   })
   res.status(201).json(result)
 })
@@ -142,7 +132,7 @@ app.put('/api/documents/:col/:id', requireAuth, (req, res) => {
   const old = store.get(req.params.col, req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
   if (!allowed(req, 'edit', req.params.col, old)) return denied(res, 'edit')
-  const { number, createdBy, purchaseOrderId, ...body } = sanitize(req.params.col, req.body)
+  const { number, createdBy, purchaseOrderId, quotationId, ...body } = sanitize(req.params.col, req.body)
   const items = Array.isArray(body.items) ? body.items : []
   if (!items.length) return res.status(400).json({ error: 'Add at least one product' })
   for (const it of items) {
@@ -151,15 +141,16 @@ app.put('/api/documents/:col/:id', requireAuth, (req, res) => {
   }
   const result = tx(() => {
     const touched = new Map()
-    if (cfg.stock) {
-      adjustStock(old.items || [], -cfg.stock).forEach((p) => touched.set(p.id, p))
-      adjustStock(items, cfg.stock).forEach((p) => touched.set(p.id, p))
-    }
+    const before = stockSign(cfg, old)
+    const after = stockSign(cfg, body)
+    if (before) adjustStock(old.items || [], -before).forEach((p) => touched.set(p.id, p))
+    if (after) adjustStock(items, after).forEach((p) => touched.set(p.id, p))
     const doc = store.update(req.params.col, old.id, {
-      ...body, number: old.number, createdBy: old.createdBy, purchaseOrderId: old.purchaseOrderId || '',
+      ...body, number: old.number, createdBy: old.createdBy,
+      purchaseOrderId: old.purchaseOrderId || '', quotationId: old.quotationId || '',
       updatedBy: req.user.name, updatedAt: new Date().toISOString(),
     })
-    return { doc, products: [...touched.values()] }
+    return { doc, products: [...touched.values()], ...refreshLinks(req.params.col, [doc], linkDb) }
   })
   res.json(result)
 })
@@ -172,9 +163,9 @@ app.delete('/api/documents/:col/:id', requireAuth, (req, res) => {
   if (!allowed(req, 'delete', req.params.col, doc)) return denied(res, 'delete')
   const result = tx(() => {
     store.remove(req.params.col, doc.id)
-    const products = cfg.stock ? adjustStock(doc.items, -cfg.stock) : []
-    const purchaseOrders = req.params.col === 'purchases' ? linkPurchaseOrder(doc, null) : []
-    return { ok: true, products, purchaseOrders }
+    const sign = stockSign(cfg, doc)
+    const products = sign ? adjustStock(doc.items, -sign) : []
+    return { ok: true, products, ...refreshLinks(req.params.col, [doc], linkDb) }
   })
   res.json(result)
 })

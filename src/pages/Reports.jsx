@@ -4,13 +4,16 @@ import { PageHeader, Card, Input, Select, Button, Modal, Field } from '../compon
 import Combo from '../components/Combo'
 import DataTable from '../components/DataTable'
 import InvoicePrint from '../components/InvoicePrint'
+import { templateKindOf } from '../config/templates'
 import { useDb, contactBalance } from '../store/db'
-import { SHOP, PAYMENT_METHODS } from '../config/shop'
+import { PAYMENT_METHODS } from '../config/shop'
+import { useShop } from '../store/shop'
 import { displayDate, inRange, money, num, round2, sftPerPiece, today } from '../utils/format'
 
 const sum = (arr, f) => arr.reduce((a, x) => a + Number(typeof f === 'function' ? f(x) : x[f] || 0), 0)
 
 function ReportShell({ title, subtitle, filters, children }) {
+  const SHOP = useShop()
   return (
     <>
       <PageHeader title={title} trail={['Reports', title]} />
@@ -23,7 +26,7 @@ function ReportShell({ title, subtitle, filters, children }) {
             <h3 className="text-base font-semibold text-gray-700 mt-1">{title}</h3>
             {subtitle && <p className="text-[12px] text-gray-600">{subtitle}</p>}
           </div>
-          {filters && <div className="flex flex-wrap gap-3 items-end mb-4 print:hidden">{filters}<Button color="success" onClick={() => window.print()}><Printer size={15} /></Button></div>}
+          {filters && <div className="flex flex-wrap justify-center gap-3 items-end mb-4 print:hidden">{filters}<Button color="success" title="Print" onClick={() => window.print()}><Printer size={15} /></Button></div>}
           {!filters && <div className="flex justify-end mb-3 print:hidden"><Button color="success" onClick={() => window.print()}><Printer size={15} /> Print</Button></div>}
           {children}
         </div>
@@ -47,17 +50,36 @@ const monthStart = () => today().slice(0, 8) + '01'
 const useRange = () => useState({ from: monthStart(), to: today() })
 
 // ---------- Stock ----------
-export function StockReport({ variant = 'status' }) {
-  const s = useDb()
-  const [f, setF] = useState({ brand: '', category: '', size: '', product: '', show: 'all' })
-  const [a, setA] = useState(f)
-  let rows = s.products
+// Brand / category / size / product / in-stock filters used by the product reports
+function filterProducts(products, a) {
+  return products
     .filter((p) => !a.brand || p.brand === a.brand)
     .filter((p) => !a.category || p.category === a.category)
     .filter((p) => !a.size || p.size === a.size)
     .filter((p) => !a.product || p.id === a.product)
     .filter((p) => a.show === 'all' || (a.show === 'in' ? p.stock > 0 : p.stock <= 0))
-  if (variant === 'emergency') rows = s.products.filter((p) => Number(p.stock) <= Number(p.alertQty || 0))
+}
+const PRODUCT_FILTER = { brand: '', category: '', size: '', product: '', show: 'all' }
+function ProductFilters({ s, f, setF, onSearch }) {
+  const opts = (list) => list.map((x) => ({ value: x.name, label: x.name }))
+  return (
+    <>
+      <Select className="!w-40" value={f.brand} onChange={(e) => setF({ ...f, brand: e.target.value })} placeholder="-- All Brands --" options={opts(s.brands)} />
+      <Select className="!w-40" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} placeholder="-- All Categories --" options={opts(s.categories)} />
+      <Select className="!w-36" value={f.size} onChange={(e) => setF({ ...f, size: e.target.value })} placeholder="-- All Sizes --" options={opts(s.sizes)} />
+      <Combo className="w-48" value={f.product} onChange={(v) => setF({ ...f, product: v })} placeholder="-- All Product --" options={[{ value: '', label: '-- All Product --' }, ...s.products.map((p) => ({ value: p.id, label: `${p.code} - ${p.name}` }))]} />
+      <Select className="!w-36" value={f.show} onChange={(e) => setF({ ...f, show: e.target.value })} options={[{ value: 'all', label: 'Show All' }, { value: 'in', label: 'In Stock' }, { value: 'out', label: 'Out of Stock' }]} />
+      <Button color="success" onClick={onSearch}>Search</Button>
+    </>
+  )
+}
+
+export function StockReport({ variant = 'status' }) {
+  const s = useDb()
+  const [f, setF] = useState(PRODUCT_FILTER)
+  const [a, setA] = useState(f)
+  const rows = filterProducts(s.products, a)
+    .filter((p) => variant !== 'emergency' || Number(p.stock) <= Number(p.alertQty || 0))
 
   const title = { status: 'Stock Report', details: 'Stock Status Details', items: 'List of Items', emergency: 'Emergency Purchase List' }[variant]
   const breakdown = (p) => {
@@ -84,23 +106,17 @@ export function StockReport({ variant = 'status' }) {
     ] : [{ key: 'status', label: 'Status' }]),
   ]
   const opts = (list) => list.map((x) => ({ value: x.name, label: x.name }))
-  const filters = variant === 'status' || variant === 'details' ? (
-    <>
-      <Select className="!w-40" value={f.brand} onChange={(e) => setF({ ...f, brand: e.target.value })} placeholder="-- All Brands --" options={opts(s.brands)} />
-      <Select className="!w-40" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} placeholder="-- All Categories --" options={opts(s.categories)} />
-      <Select className="!w-36" value={f.size} onChange={(e) => setF({ ...f, size: e.target.value })} placeholder="-- All Sizes --" options={opts(s.sizes)} />
-      <Combo className="w-48" value={f.product} onChange={(v) => setF({ ...f, product: v })} placeholder="-- All Product --" options={[{ value: '', label: '-- All Product --' }, ...s.products.map((p) => ({ value: p.id, label: `${p.code} - ${p.name}` }))]} />
-      <Select className="!w-36" value={f.show} onChange={(e) => setF({ ...f, show: e.target.value })} options={[{ value: 'all', label: 'Show All' }, { value: 'in', label: 'In Stock' }, { value: 'out', label: 'Out of Stock' }]} />
-      <Button color="success" onClick={() => setA(f)}>Search</Button>
-    </>
-  ) : null
+  const filters = <ProductFilters s={s} f={f} setF={setF} onSearch={() => setA(f)} />
 
   return (
     <ReportShell title={title} filters={filters}>
       <DataTable columns={columns} rows={rows} pageSizes={[100, 250, 500]}
-        footer={variant !== 'items' && (
-          <tr className="border-t"><td colSpan={columns.length - 1} className="px-3 py-2 text-right">Total Stock Value</td>
-            <td className="px-3 py-2 text-right">{money(sum(rows, (p) => p.stock * p.purchasePrice))}</td></tr>
+        footer={variant !== 'items' && rows.length > 0 && (
+          <tr className="border-t">
+            <td colSpan={columns.length - 2} className="px-3 py-2 text-right">Total Stock/SFT &amp; Stock Value</td>
+            <td className="px-3 py-2 text-right">{money(sum(rows, 'stock'))}</td>
+            <td className="px-3 py-2 text-right">{money(sum(rows, (p) => p.stock * p.purchasePrice))}</td>
+          </tr>
         )} />
     </ReportShell>
   )
@@ -108,10 +124,14 @@ export function StockReport({ variant = 'status' }) {
 
 export function StockWithImage() {
   const s = useDb()
+  const [f, setF] = useState(PRODUCT_FILTER)
+  const [a, setA] = useState(f)
+  const rows = filterProducts(s.products, a)
   return (
-    <ReportShell title="Product With Image">
+    <ReportShell title="Product With Image" filters={<ProductFilters s={s} f={f} setF={setF} onSearch={() => setA(f)} />}>
+      {!rows.length && <p className="text-center text-gray-500 text-[13px] py-6">No products match.</p>}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        {s.products.map((p) => (
+        {rows.map((p) => (
           <div key={p.id} className="border rounded p-3 text-[12px]">
             <div className="aspect-square bg-gray-100 rounded mb-2 flex items-center justify-center overflow-hidden">
               {p.image ? <img src={p.image} alt={p.name} className="w-full h-full object-cover" /> : <ImageOff className="text-gray-300" size={32} />}
@@ -131,6 +151,7 @@ const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => String(a)
 
 // Shop header used on the printed statements
 function PrintHead() {
+  const SHOP = useShop()
   return (
     <div className="flex items-start justify-between mb-3">
       <div>
@@ -200,6 +221,7 @@ export function StatementReport({ collection, title, party = 'Customer' }) {
       })
     const tot = (fn) => round2(groups.reduce((acc, g) => acc + g.sign * fn(g), 0))
     const totals = {
+      qty: tot((g) => g.lines.reduce((x, l) => x + l.qty, 0)),
       tPrice: tot((g) => g.lines.reduce((x, l) => x + l.tPrice, 0)),
       disc: tot((g) => g.lines.reduce((x, l) => x + l.disc, 0)),
       payable: tot((g) => g.lines.reduce((x, l) => x + l.payable, 0)),
@@ -310,7 +332,8 @@ export function StatementReport({ collection, title, party = 'Customer' }) {
                 {report.groups.length > 0 && (
                   <tfoot className="font-semibold bg-gray-50">
                     <tr>
-                      <td colSpan={8} className={`${td} text-right`}>Total{a.kind !== 'S' && ' (returns subtracted)'}</td>
+                      <td colSpan={6} className={`${td} text-right`}>Total{a.kind !== 'S' && ' (returns subtracted)'}</td>
+                      <td className={`${td} text-right`}>{round2(report.totals.qty)}</td><td className={td} />
                       <td className={`${td} text-right`}>{money(report.totals.tPrice)}</td><td className={`${td} text-right`}>{money(report.totals.disc)}</td>
                       <td className={`${td} text-right`}>{money(report.totals.payable)}</td><td className={`${td} text-right`}>{money(report.totals.vat)}</td>
                       <td className={`${td} text-right`}>{money(report.totals.tDisc)}</td><td className={`${td} text-right`}>{money(report.totals.net)}</td>
@@ -382,7 +405,7 @@ export function SummaryReport({ collection, title }) {
           </tr>
         )} />
       <Modal open={!!open} onClose={() => setOpen(null)} title={open && `${sale ? 'Invoice' : 'Bill'} ${open.number}`} wide>
-        {open && <InvoicePrint doc={open} />}
+        {open && <InvoicePrint doc={open} kind={templateKindOf(collection, open)} title={sale ? 'Invoice' : 'Purchase'} />}
       </Modal>
     </ReportShell>
   )
@@ -427,6 +450,10 @@ const MOVES = {
   purchaseReturn: ['Purchase Return', 'Received from', 'Received For Purchase Return'],
   receive: ['Previous Due Collection', 'Received from', 'Previous Due Collection'],
   pay: ['Previous Due Paid', 'Paid to', 'Previous Due Paid'],
+  advanceIn: ['Advance from Customer', 'Received from', 'Advance Received'],
+  advanceOut: ['Advance to Supplier', 'Paid to', 'Advance Paid'],
+  loanIn: ['Loan Collection', 'Received from', 'Loan Collected'],
+  loanOut: ['Loan Payment', 'Paid to', 'Loan Repaid'],
   customerAdvance: ['Return Customer Advance', 'Paid to', 'Customer Advance Returned'],
   supplierAdvance: ['Supplier Advance Return', 'Received from', 'Supplier Advance Returned'],
   expense: ['Expense', 'Against', 'Expense'],
@@ -447,7 +474,8 @@ function cashFlows(s) {
   docPays(s.salesReturns, 'salesReturn', 'out')
   docPays(s.purchaseReturns, 'purchaseReturn', 'in')
   const rec = (r) => ({ date: r.date, at: r.createdAt, vid: r.number || '', method: r.method, note: r.note || '', entryBy: r.createdBy })
-  s.payments.forEach((p) => add(p.type === 'receive' ? 'receive' : 'pay', { ...rec(p), name: p.contactName, [p.type === 'receive' ? 'in' : 'out']: num(p.amount) }))
+  s.payments.forEach((p) => add(p.type === 'receive' ? (p.advance ? 'advanceIn' : 'receive') : (p.advance ? 'advanceOut' : 'pay'), { ...rec(p), name: p.contactName, [p.type === 'receive' ? 'in' : 'out']: num(p.amount) }))
+  ;(s.loans || []).forEach((l) => add(l.type === 'collect' ? 'loanIn' : 'loanOut', { ...rec(l), name: l.contactName, [l.type === 'collect' ? 'in' : 'out']: num(l.amount) }))
   s.settlements.filter((x) => x.refund).forEach((x) => add(x.kind === 'supplier' ? 'supplierAdvance' : 'customerAdvance', { ...rec(x), name: x.contactName, [x.kind === 'supplier' ? 'in' : 'out']: num(x.amount) }))
   s.expenses.forEach((e) => add('expense', { ...rec(e), name: e.head, out: num(e.amount) }))
   s.incomes.forEach((e) => add('income', { ...rec(e), name: e.head, in: num(e.amount) }))
@@ -550,6 +578,7 @@ function BookRows({ flows, from, to, totalLabel = 'TOTAL', title }) {
 
 export function BookReport({ bank }) {
   const s = useDb()
+  const SHOP = useShop()
   const [a, filters] = useRangeFilter({ from: monthStart(), to: today() })
   const all = cashFlows(s)
   const title = bank ? 'Bank Book' : 'Cash Book'
@@ -704,7 +733,7 @@ function ledgerEntries(contact, s) {
     if (num(d.paid)) push({ date: d.date, at: d.createdAt, details: sup ? 'Return Money Received' : 'Return Money Paid', trans: d.number, through: through(d), debit: num(d.paid) })
   })
   s.payments.filter((p) => mine(p) && p.type === (sup ? 'pay' : 'receive')).forEach((p) => {
-    push({ date: p.date, at: p.createdAt, details: sup ? 'Previous Due Paid' : 'Previous Due Collection', trans: p.number, note: p.note, through: p.method, credit: num(p.amount) })
+    push({ date: p.date, at: p.createdAt, details: p.advance ? (sup ? 'Advance Paid' : 'Advance Received') : sup ? 'Previous Due Paid' : 'Previous Due Collection', trans: p.number, note: p.note, through: p.method, credit: num(p.amount) })
     if (num(p.discount)) push({ date: p.date, at: p.createdAt, details: 'Discount', trans: p.number, credit: num(p.discount) })
   })
   s.settlements.filter(mine).forEach((x) => push(x.refund
@@ -839,14 +868,35 @@ export function ItemWiseReport({ supplier }) {
 export function RegisterList({ type }) {
   const s = useDb()
   const title = { customer: 'Buyer List', retailer: 'Retailer List', supplier: 'Supplier List' }[type]
-  const rows = s.contacts.filter((c) => c.type === type)
+  const word = { customer: 'Customer', retailer: 'Retailer', supplier: 'Supplier' }[type]
+  const all = s.contacts.filter((c) => c.type === type).map((c) => ({ ...c, balance: contactBalance(c, s) }))
+  const [f, setF] = useState({ contactId: '', q: '', dues: 'all' })
+  const [a, setA] = useState(f)
+  const q = a.q.trim().toLowerCase()
+  const rows = all
+    .filter((c) => !a.contactId || c.id === a.contactId)
+    .filter((c) => !q || [c.name, c.phone, c.altPhone, c.address, c.organization, c.code].some((x) => String(x ?? '').toLowerCase().includes(q)))
+    .filter((c) => ({ all: true, due: c.balance > 0.005, none: Math.abs(c.balance) <= 0.005, advance: c.balance < -0.005 }[a.dues]))
+  const duesLabel = { all: 'All', due: 'Dues Available', none: 'No Dues', advance: 'Advance' }
   return (
-    <ReportShell title={title}>
-      <DataTable rows={rows} columns={[
+    <ReportShell title={title} subtitle={a.dues !== 'all' || a.q ? `${duesLabel[a.dues]}${a.q ? ` · "${a.q}"` : ''}` : ''} filters={(
+      <>
+        <Field label={word}>
+          <Combo className="w-60" value={f.contactId} onChange={(v) => setF({ ...f, contactId: v })} placeholder={`--All ${word}s--`}
+            options={[{ value: '', label: `--All ${word}s--` }, ...all.map((c) => ({ value: c.id, label: `${c.name}${c.phone ? ` - ${c.phone}` : ''}` }))]} />
+        </Field>
+        <Field label="Name / Number / Address"><Input className="!w-56" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && setA(f)} /></Field>
+        <Field label="Dues">
+          <Select className="!w-40" value={f.dues} onChange={(e) => setF({ ...f, dues: e.target.value })} options={Object.entries(duesLabel).map(([value, label]) => ({ value, label }))} />
+        </Field>
+        <Button color="success" onClick={() => setA(f)}><Search size={15} /> Search</Button>
+      </>
+    )}>
+      <DataTable rows={rows} pageSizes={[100, 250, 500]} columns={[
         { key: 'code', label: 'ID' }, { key: 'name', label: 'Name' }, { key: 'organization', label: 'Organization' },
         { key: 'phone', label: 'Phone' }, { key: 'address', label: 'Address' },
-        { key: 'balance', label: 'Balance', align: 'right', render: (c) => money(contactBalance(c, s)), sortable: false },
-      ]} />
+        { key: 'balance', label: 'Balance', align: 'right', render: (c) => money(c.balance) },
+      ]} footer={rows.length > 0 && <tr className="border-t"><td colSpan={5} className="px-3 py-2 text-right">Total</td><td className="px-3 py-2 text-right">{money(sum(rows, 'balance'))}</td></tr>} />
     </ReportShell>
   )
 }

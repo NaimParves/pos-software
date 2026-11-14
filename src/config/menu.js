@@ -1,6 +1,6 @@
 import {
   Home, ShoppingBasket, Undo2, Briefcase, ClipboardList, PackageX, CircleDollarSign,
-  Mail, CalendarCheck, Wallet, LayoutGrid, Wrench,
+  Mail, CalendarCheck, Wallet, LayoutGrid, Wrench, FileText, Landmark,
 } from 'lucide-react'
 
 // Sidebar navigation. Items with `children` are collapsible groups.
@@ -21,6 +21,12 @@ export const MENU = [
     ],
   },
   {
+    label: 'Price Quotation', icon: FileText, children: [
+      { label: 'Create Quotation', path: '/quotations' },
+      { label: 'List Of Quotation', path: '/quotations/all-quotations' },
+    ],
+  },
+  {
     label: 'Purchase', icon: Briefcase, children: [
       { label: 'Purchase Item', path: '/bills' },
       { label: 'List of Purchase', path: '/bills/all-bills' },
@@ -35,8 +41,14 @@ export const MENU = [
   },
   {
     label: 'Damages', icon: PackageX, children: [
-      { label: 'All Damages', path: '/damages' },
       { label: 'New Damage Entry', path: '/damages/create' },
+      { label: 'All Damages', path: '/damages' },
+    ],
+  },
+  {
+    label: 'Loan', icon: Landmark, children: [
+      { label: 'Loan Collection', path: '/loans/collection' },
+      { label: 'Loan Payment', path: '/loans/payment' },
     ],
   },
   {
@@ -46,6 +58,8 @@ export const MENU = [
       { label: 'Balance Transfer', path: '/balancetransfer' },
       { label: 'Receive From Customer', path: '/payments/receive' },
       { label: 'Pay To Supplier', path: '/payments/pay' },
+      { label: 'Advance from Customer', path: '/advances/customer' },
+      { label: 'Advance to Supplier', path: '/advances/supplier' },
       { label: 'Customer Settlement', path: '/settlements/customer' },
       { label: 'Supplier Settlement', path: '/settlements/supplier' },
     ],
@@ -100,6 +114,7 @@ export const MENU = [
           { label: 'Stock Status', path: '/reports/stock' },
           { label: 'Stock Status Details', path: '/reports/stock-status-details' },
           { label: 'Product With Image', path: '/reports/stock-with-image' },
+          { label: 'Product Ledger', path: '/reports/product-ledger' },
           { label: 'Customer Ledger', path: '/reports/due-customer' },
           { label: 'Supplier Ledger', path: '/reports/due-supplier' },
         ],
@@ -130,6 +145,8 @@ export const MENU = [
           { label: 'Product Variations', path: '/products/variations' },
           { label: 'Print Barcode', path: '/products/barcode-print' },
           { label: 'Bulk Opening Stock', path: '/products/add-opening-stock' },
+          { label: 'Bulk Product Update', path: '/products/bulk-update' },
+          { label: 'Product Stock In Out', path: '/products/stock-in-out' },
         ],
       },
       {
@@ -139,6 +156,7 @@ export const MENU = [
           { label: 'Add Supplier', path: '/contacts/supplier' },
           { label: 'Add Employee', path: '/contacts/employee' },
           { label: 'Add Reference', path: '/contacts/reference' },
+          { label: 'Add Lender', path: '/contacts/lender' },
         ],
       },
       {
@@ -158,6 +176,11 @@ export const MENU = [
           { label: 'Add User', path: '/users' },
           { label: 'List of User', path: '/users/all-users' },
           { label: 'Set Permission', path: '/accesslevel/set-access' },
+        ],
+      },
+      {
+        label: 'Template', children: [
+          { label: 'Template Settings', path: '/settings/templates' },
         ],
       },
       {

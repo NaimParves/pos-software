@@ -60,7 +60,8 @@ export default function CrudPage({ config }) {
     ...(c.number ? [{ key: 'number', label: 'Number' }] : []),
     ...listFields.map((fl) => ({
       key: fl.key, label: fl.label, align: fl.type === 'number' ? 'right' : undefined,
-      render: fl.render || ((r) => (fl.type === 'date' ? displayDate(r[fl.key]) : fl.money ? money(r[fl.key]) : String(r[fl.key] ?? ''))),
+      render: fl.render || ((r) => (fl.type === 'image' ? (r[fl.key] ? <img src={r[fl.key]} alt="" className="h-8 max-w-[80px] object-contain" /> : '')
+        : fl.type === 'date' ? displayDate(r[fl.key]) : fl.money ? money(r[fl.key]) : String(r[fl.key] ?? ''))),
     })),
     ...(c.listOnly || (!allow.edit && !allow.delete) ? [] : [{
       key: 'action', label: 'Action', render: (r) => (
@@ -77,6 +78,22 @@ export default function CrudPage({ config }) {
     const on = (val) => setF((x) => ({ ...x, [fl.key]: val }))
     if (fl.type === 'select') return <Select value={v} onChange={(e) => on(e.target.value)} placeholder={'placeholder' in fl ? fl.placeholder : `--Select ${fl.label}--`} options={optionsFor(fl)} />
     if (fl.type === 'combo') return <Combo value={v} onChange={on} placeholder={`--Select ${fl.label}--`} options={optionsFor(fl)} />
+    if (fl.type === 'image') {
+      return (
+        <div className="flex items-center gap-2">
+          <input type="file" accept="image/*" className="text-[12px] w-full" onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (!file) return
+            if (file.size > 1.5 * 1024 * 1024) { alert('Please pick an image smaller than 1.5 MB.'); return }
+            const r = new FileReader()
+            r.onload = () => on(r.result)
+            r.readAsDataURL(file)
+          }} />
+          {v && <img src={v} alt="" className="h-9 max-w-[90px] object-contain border rounded" />}
+          {v && <button type="button" className="text-danger text-[12px]" onClick={() => on('')}>Remove</button>}
+        </div>
+      )
+    }
     if (fl.type === 'textarea') return <Textarea value={v} placeholder={fl.label} onChange={(e) => on(e.target.value)} />
     return <Input type={fl.type || 'text'} value={v} placeholder={fl.placeholder ?? fl.label} onChange={(e) => on(e.target.value)} />
   }

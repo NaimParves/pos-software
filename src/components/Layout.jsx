@@ -6,15 +6,26 @@ import {
 import { Modal, Field, Input, Button } from './ui'
 import { api } from '../store/api'
 import { MENU } from '../config/menu'
-import { SHOP } from '../config/shop'
+import { useShop } from '../store/shop'
+import { PAPER_SIZES } from '../config/templates'
 import { useCollection, db } from '../store/db'
 import { logout, useUser } from '../store/auth'
 
 const hasPath = (item, path) => item.path === path || (item.children || []).some((c) => hasPath(c, path))
 
-function MenuItem({ item, depth = 0, path, onNavigate }) {
-  const [open, setOpen] = useState(() => hasPath(item, path))
-  useEffect(() => { if (hasPath(item, path)) setOpen(true) }, [path, item])
+// One level of the menu. Only one group is open at a time: opening a group
+// closes its open siblings. The group holding the current page opens itself.
+function MenuList({ items, depth = 0, path, onNavigate }) {
+  const active = items.find((i) => i.children && hasPath(i, path))?.label || null
+  const [open, setOpen] = useState(active)
+  useEffect(() => { if (active) setOpen(active) }, [active])
+  return items.map((i) => (
+    <MenuItem key={i.label + (i.path || '')} item={i} depth={depth} path={path} onNavigate={onNavigate}
+      open={open === i.label} onToggle={() => setOpen((o) => (o === i.label ? null : i.label))} />
+  ))
+}
+
+function MenuItem({ item, depth = 0, path, onNavigate, open, onToggle }) {
   const Icon = item.icon
   const pad = depth === 0 ? 'pl-5' : depth === 1 ? 'pl-11' : 'pl-14'
   const size = depth === 0 ? 'text-[13.5px]' : 'text-[13px]'
@@ -23,6 +34,7 @@ function MenuItem({ item, depth = 0, path, onNavigate }) {
     return (
       <NavLink
         to={item.path}
+        end
         onClick={onNavigate}
         className={({ isActive }) =>
           `flex items-center gap-3 ${pad} pr-4 py-2 ${size} transition ${isActive ? 'text-white font-medium' : 'text-sidebar-text hover:text-white'}`
@@ -37,8 +49,9 @@ function MenuItem({ item, depth = 0, path, onNavigate }) {
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
-        className={`w-full flex items-center gap-3 ${pad} pr-4 py-2 ${size} transition ${active ? 'text-white' : 'text-sidebar-text hover:text-white'}`}
+        onClick={onToggle}
+        aria-expanded={open}
+        className={`w-full flex items-center gap-3 ${pad} pr-4 py-2 ${size} transition ${active || open ? 'text-white' : 'text-sidebar-text hover:text-white'}`}
       >
         {Icon && <Icon size={17} />}
         <span className="flex-1 text-left">{item.label}</span>
@@ -46,7 +59,7 @@ function MenuItem({ item, depth = 0, path, onNavigate }) {
       </button>
       {open && (
         <div className="pb-1">
-          {item.children.map((c) => <MenuItem key={c.label + (c.path || '')} item={c} depth={depth + 1} path={path} onNavigate={onNavigate} />)}
+          <MenuList items={item.children} depth={depth + 1} path={path} onNavigate={onNavigate} />
         </div>
       )}
     </div>
@@ -72,6 +85,8 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [pwOpen, setPwOpen] = useState(false)
+  const SHOP = useShop()
+  const paper = PAPER_SIZES.find((p) => p.value === SHOP.paperSize)?.css || 'A4 portrait'
   const stockOut = products.filter((p) => Number(p.stock) <= Number(p.alertQty || 0)).length
 
   const sidebar = (
@@ -81,13 +96,15 @@ export default function Layout() {
       </Link>
       <div className="px-5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-[#6a7187]">Menu</div>
       <nav className="pb-8">
-        {MENU.map((m) => <MenuItem key={m.label} item={m} path={pathname} onNavigate={() => setMobileOpen(false)} />)}
+        <MenuList items={MENU} path={pathname} onNavigate={() => setMobileOpen(false)} />
       </nav>
     </aside>
   )
 
   return (
     <div className="flex h-screen bg-page print:block print:h-auto print:bg-white">
+      {/* the branch's paper size (Basic Settings > Add Branch) */}
+      <style>{`@media print { @page { size: ${paper}; margin: 8mm; } }`}</style>
       {/* desktop sidebar */}
       <div className={`hidden lg:block shrink-0 transition-all ${collapsed ? 'w-0 overflow-hidden' : 'w-[250px]'}`}>{sidebar}</div>
       {/* mobile sidebar */}

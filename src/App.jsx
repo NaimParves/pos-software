@@ -6,9 +6,12 @@ import InvoiceForm from './pages/InvoiceForm'
 import InvoiceList from './pages/InvoiceList'
 import ReturnForm from './pages/ReturnForm'
 import AccountsPayment from './pages/Accounts'
+import { DamageForm, DamageList } from './pages/Damages'
+import { StockInOut, ProductLedger, BulkProductUpdate } from './pages/Stock'
 import Products from './pages/Products'
 import Contacts from './pages/Contacts'
 import CrudPage from './pages/CrudPage'
+import TemplateSettings from './pages/TemplateSettings'
 import * as R from './pages/Reports'
 import { BarcodePrint, OpeningStock, SendMessage, DueCustomer, SetPermission, NotFound } from './pages/Misc'
 import { CRUD_PAGES } from './config/crudPages'
@@ -58,27 +61,33 @@ export default function App() {
 
         {/* Sales */}
         {page('/invoices', <InvoiceForm mode="sale" />)}
-        {page('/invoices/all-sales', <InvoiceList title="All Sales" collection="sales" stockSign={-1} delivery editPath="/invoices" returnPath="/salesreturn" returnLabel="Sales Return" />)}
-        {page('/invoices/all-challan-list', <InvoiceList title="List of Challans" collection="sales" challan delivery />)}
+        {page('/invoices/all-sales', <InvoiceList title="All Sales" collection="sales" stockSign={-1} delivery editPath="/invoices" returnPath="/salesreturn" returnLabel="Sales Return" dashboard="sales" range="today" />)}
+        {page('/invoices/all-challan-list', <InvoiceList title="List of Challans" collection="sales" challan delivery challanCol dashboard="challan" range="today" />)}
         {page('/salesreturn', <ReturnForm mode="salesReturn" />)}
         {page('/salesreturn/direct-return/create', <ReturnForm mode="directReturn" />)}
-        {page('/salesreturn/direct-return', <InvoiceList title="List of Return" collection="salesReturns" stockSign={1} editPath={(d) => (d.sourceId ? '/salesreturn' : '/salesreturn/direct-return/create')} />)}
+        {page('/salesreturn/direct-return', <InvoiceList title="List of Return" collection="salesReturns" stockSign={1} editPath={(d) => (d.sourceId ? '/salesreturn' : '/salesreturn/direct-return/create')} showContact sourceCol amountOnly />)}
+
+        {/* Price quotation (no stock change until converted to a sale) */}
+        {page('/quotations', <InvoiceForm mode="quotation" />)}
+        {page('/quotations/all-quotations', <InvoiceList title="List Of Quotation" collection="quotations" editPath="/quotations" convertPath="/invoices" amountOnly />)}
 
         {/* Purchase */}
         {page('/bills', <InvoiceForm mode="purchase" />)}
-        {page('/bills/all-bills', <InvoiceList title="All Purchase" collection="purchases" partyLabel="Supplier" partyTypes={['supplier']} stockSign={1} editPath="/bills" returnPath="/purchasereturn" returnLabel="Purchase Return" />)}
+        {page('/bills/all-bills', <InvoiceList title="All Purchase" collection="purchases" partyLabel="Supplier" partyTypes={['supplier']} stockSign={1} editPath="/bills" returnPath="/purchasereturn" returnLabel="Purchase Return" challanCol dashboard="purchase" range="today" />)}
         {page('/purchasereturn', <ReturnForm mode="purchaseReturn" />)}
         {page('/purchaseorders', <InvoiceForm mode="purchaseOrder" />)}
-        {page('/purchaseorders/all-purchase-orders', <InvoiceList title="List of P/O" collection="purchaseOrders" partyLabel="Supplier" partyTypes={['supplier']} editPath="/purchaseorders" receivePath="/bills" />)}
+        {page('/purchaseorders/all-purchase-orders', <InvoiceList title="List of P/O" collection="purchaseOrders" partyLabel="Supplier" partyTypes={['supplier']} editPath="/purchaseorders" receivePath="/bills" dashboard="po" range="month" />)}
 
         {/* Damages */}
-        {page('/damages', <InvoiceList title="All Damages" collection="damages" partyLabel="Note" partyTypes={[]} stockSign={-1} editPath="/damages/create" />)}
-        {page('/damages/create', <InvoiceForm mode="damage" />)}
+        {page('/damages', <DamageList />)}
+        {page('/damages/create', <DamageForm />)}
 
         {/* Products & registers */}
         {page('/products', <Products />)}
         {page('/products/barcode-print', <BarcodePrint />)}
         {page('/products/add-opening-stock', <OpeningStock />)}
+        {page('/products/bulk-update', <BulkProductUpdate />)}
+        {page('/products/stock-in-out', <StockInOut />)}
         <Route path="/contacts/:type" element={<ContactsRoute />} />
 
         {/* Accounts: payments and settlements */}
@@ -86,11 +95,16 @@ export default function App() {
         {page('/payments/pay', <AccountsPayment mode="pay" />)}
         {page('/settlements/customer', <AccountsPayment mode="customerSettlement" />)}
         {page('/settlements/supplier', <AccountsPayment mode="supplierSettlement" />)}
+        {page('/advances/customer', <AccountsPayment mode="advanceCustomer" />)}
+        {page('/advances/supplier', <AccountsPayment mode="advanceSupplier" />)}
+        {page('/loans/collection', <AccountsPayment mode="loanCollection" />)}
+        {page('/loans/payment', <AccountsPayment mode="loanPayment" />)}
 
         {/* Messaging & security */}
         {page('/messages/send-index', <SendMessage />)}
         {page('/messages/due-customer', <DueCustomer />)}
         {page('/accesslevel/set-access', <SetPermission />)}
+        {page('/settings/templates', <TemplateSettings />)}
 
         {/* Reports */}
         {page('/reports/sales-statement', <R.StatementReport collection="sales" title="Statement of Sales" />)}
@@ -106,6 +120,7 @@ export default function App() {
         {page('/reports/stock', <R.StockReport variant="status" />)}
         {page('/reports/stock-status-details', <R.StockReport variant="details" />)}
         {page('/reports/stock-with-image', <R.StockWithImage />)}
+        {page('/reports/product-ledger', <ProductLedger />)}
         {page('/reports/due-customer', <R.LedgerReport />)}
         {page('/reports/due-supplier', <R.LedgerReport supplier />)}
         {page('/reports/item-list', <R.StockReport variant="items" />)}

@@ -6,7 +6,7 @@ import DataTable from '../components/DataTable'
 import { db, useCollection } from '../store/db'
 import { useCan } from '../store/permissions'
 
-const LABEL = { customer: 'Customer', retailer: 'Retailer', supplier: 'Supplier', employee: 'Employee', reference: 'Reference' }
+const LABEL = { customer: 'Customer', retailer: 'Retailer', supplier: 'Supplier', employee: 'Employee', reference: 'Reference', lender: 'Lender' }
 const blank = { name: '', organization: '', address: '', phone: '', altPhone: '', nid: '', openingBalance: '', designation: '', salary: '', image: '' }
 
 export default function Contacts() {

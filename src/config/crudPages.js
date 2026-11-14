@@ -1,10 +1,22 @@
 import { PAYMENT_METHODS } from './shop.js'
+import { PAPER_SIZES } from './templates.js'
 
 const status = { key: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive'], default: 'Active', placeholder: undefined }
 const master = (title, collection, extra = []) => ({
   title, collection, listTitle: `All ${title.replace(/^Add /, '')}`,
   fields: [{ key: 'name', label: 'Name', required: true }, ...extra, status],
 })
+// Chart of Accounts: parent -> account types
+export const ACCOUNT_TYPES = {
+  Asset: ['Current Asset', 'Non-Current Asset', 'Fixed Asset', 'Cash & Cash Equivalent'],
+  Liability: ['Current Liability', 'Non-Current Liability', "Owner's Equity"],
+  Income: ['General Income', 'Sales Related Income', 'Others Income'],
+  Expense: ['General Expense', 'Purchase Related Expense', 'Others Expense'],
+}
+const ACCOUNT_PARENT = Object.fromEntries(Object.entries(ACCOUNT_TYPES).flatMap(([parent, subs]) => subs.map((x) => [x, parent])))
+const ACCOUNT_TYPE_OPTIONS = Object.entries(ACCOUNT_TYPES).flatMap(([parent, subs]) => subs.map((x) => ({ value: x, label: `${parent} › ${x}` })))
+const activeHead = (type) => (a) => a.type === type && a.status !== 'Inactive'
+
 const method = { key: 'method', label: 'Paid Through', type: 'select', options: PAYMENT_METHODS, required: true }
 const employee = { key: 'employeeId', label: 'Employee', type: 'combo', required: true, from: { collection: 'contacts', filter: (c) => c.type === 'employee', value: 'id', label: 'name' }, hideInList: true }
 const empName = (r, s) => ({ ...r, employeeName: s.contacts.find((c) => c.id === r.employeeId)?.name || '' })
@@ -24,7 +36,7 @@ export const CRUD_PAGES = {
     fields: [
       { key: 'date', label: 'Expense Date', type: 'date', default: 'today', required: true },
       { key: 'contact', label: 'Paid/Expense To', type: 'combo', from: { collection: 'contacts' } },
-      { key: 'head', label: 'Account Head', type: 'combo', required: true, from: { collection: 'accountHeads', filter: (a) => a.type === 'Expense' } },
+      { key: 'head', label: 'Account Head', type: 'combo', required: true, from: { collection: 'accountHeads', filter: activeHead('Expense') } },
       { key: 'amount', label: 'Amount', type: 'number', required: true, money: true },
       { ...method, default: 'Cash' },
       { key: 'info', label: 'Account Information' },
@@ -36,7 +48,7 @@ export const CRUD_PAGES = {
     fields: [
       { key: 'date', label: 'Income Date', type: 'date', default: 'today', required: true },
       { key: 'contact', label: 'Received From', type: 'combo', from: { collection: 'contacts' } },
-      { key: 'head', label: 'Account Head', type: 'combo', required: true, from: { collection: 'accountHeads', filter: (a) => a.type === 'Income' } },
+      { key: 'head', label: 'Account Head', type: 'combo', required: true, from: { collection: 'accountHeads', filter: activeHead('Income') } },
       { key: 'amount', label: 'Amount', type: 'number', required: true, money: true },
       { ...method, label: 'Received Through', default: 'Cash' },
       { key: 'info', label: 'Account Information' },
@@ -54,8 +66,22 @@ export const CRUD_PAGES = {
     ],
   },
   '/accounts/chart-of-accounts': {
-    title: 'Chart of Accounts', collection: 'accountHeads', listTitle: 'Account Heads',
-    fields: [{ key: 'name', label: 'Account Head', required: true }, { key: 'type', label: 'Type', type: 'select', options: ['Expense', 'Income', 'Asset', 'Liability'], required: true }],
+    title: 'Chart of Accounts', collection: 'accountHeads', listTitle: 'All Chart of Account',
+    help: 'Pick the account type; its parent (Asset, Liability, Income or Expense) is set from it. Expense and Income heads show up on the Expenses and Incomes pages; inactive heads are hidden there.',
+    fields: [
+      { key: 'name', label: 'Account Name', required: true, placeholder: 'Enter Account Name' },
+      { key: 'description', label: 'Description', placeholder: 'Enter Description' },
+      { key: 'subType', label: 'Account Type', type: 'select', required: true, placeholder: '--Select Account Type--', options: ACCOUNT_TYPE_OPTIONS },
+      status,
+    ],
+    transform: (r) => ({ ...r, type: ACCOUNT_PARENT[r.subType] || r.type }),
+    columns: [
+      { key: 'name', label: 'Account Name' },
+      { key: 'type', label: 'Parent Account', render: (r) => ({ Asset: 'Assets', Liability: 'Liability', Income: 'Income', Expense: 'Expense' }[r.type] || r.type || '') },
+      { key: 'subType', label: 'Account Type' },
+      { key: 'description', label: 'Description' },
+      { key: 'status', label: 'Status', render: (r) => r.status || 'Active' },
+    ],
   },
 
   '/messages': {
@@ -70,7 +96,22 @@ export const CRUD_PAGES = {
 
   '/branch': {
     title: 'Add Branch', collection: 'branches', listTitle: 'All Branches',
-    fields: [{ key: 'name', label: 'Branch Name', required: true }, { key: 'address', label: 'Address' }, { key: 'phone', label: 'Phone' }],
+    help: 'Once Organization Name is filled in, the branch details (organization name, address, contact number, email, website and logo) are printed at the top of every report and document (Template Settings › Global Report Header can override them). Labour Cost/Cartoon is used for "Auto Labor Cost" on sales; Printer Type sets the paper size for printing.',
+    fields: [
+      { key: 'name', label: 'Branch Name', required: true },
+      { key: 'organization', label: 'Organization Name' },
+      { key: 'address', label: 'Address', span: 2 },
+      { key: 'phone', label: 'Contact Number' },
+      { key: 'email', label: 'Email' },
+      { key: 'website', label: 'Website' },
+      { key: 'paperSize', label: 'Printer Type', type: 'select', options: PAPER_SIZES.map(({ value, label }) => ({ value, label })), default: 'A4', placeholder: undefined },
+      { key: 'laborPerCarton', label: 'Labour Cost/Cartoon', type: 'number', default: 10 },
+      { key: 'logo', label: 'Logo', type: 'image', hideInList: true },
+    ],
+    columns: [
+      { key: 'name', label: 'Branch Name' }, { key: 'address', label: 'Address' }, { key: 'phone', label: 'Contact Number' },
+      { key: 'logo', label: 'Logo', type: 'image' },
+    ],
   },
   '/users': {
     title: 'Add User', collection: 'users', listTitle: 'Users',
