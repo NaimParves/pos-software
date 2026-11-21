@@ -8,6 +8,7 @@ import ReturnForm from './pages/ReturnForm'
 import AccountsPayment from './pages/Accounts'
 import { DamageForm, DamageList } from './pages/Damages'
 import { StockInOut, ProductLedger, BulkProductUpdate } from './pages/Stock'
+import { ManualAttendance, ProcessSalarySheet, SalarySheetList, PaySlip, PaySlipList, EmployeeAdvance } from './pages/Payroll'
 import Products from './pages/Products'
 import Contacts from './pages/Contacts'
 import CrudPage from './pages/CrudPage'
@@ -105,6 +106,14 @@ export default function App() {
         {page('/messages/due-customer', <DueCustomer />)}
         {page('/accesslevel/set-access', <SetPermission />)}
         {page('/settings/templates', <TemplateSettings />)}
+
+        {/* Attendance & payroll */}
+        {page('/attendance/manual-attendance', <ManualAttendance />)}
+        {page('/payroll/process-monthly-salary/create', <ProcessSalarySheet />)}
+        {page('/payroll/process-monthly-salary', <SalarySheetList />)}
+        {page('/payroll/pay-slip', <PaySlip />)}
+        {page('/payroll/pay-slip/all-pay-slips', <PaySlipList />)}
+        {page('/payroll/employee-advance', <EmployeeAdvance />)}
 
         {/* Reports */}
         {page('/reports/sales-statement', <R.StatementReport collection="sales" title="Statement of Sales" />)}

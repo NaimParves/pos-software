@@ -35,6 +35,9 @@ export const ACTION_PAGES = [
   { group: 'Loan', path: '/loans/payment', label: 'Loan Payment', collection: 'loans', match: (r) => r.type === 'pay' },
   { group: 'Accounts', path: '/settlements/customer', label: 'Customer Settlement', collection: 'settlements', match: (r) => r.kind === 'customer' },
   { group: 'Accounts', path: '/settlements/supplier', label: 'Supplier Settlement', collection: 'settlements', match: (r) => r.kind === 'supplier' },
+  { group: 'Attendance', path: '/attendance/manual-attendance', label: 'Manual Attendance', collection: 'attendance', noDelete: true },
+  { group: 'Payroll', path: '/payroll/process-monthly-salary', label: 'List of Salary Sheet', collection: 'salarySheets' },
+  { group: 'Payroll', path: '/payroll/employee-advance', label: 'Employee Advance / Partial Pay', collection: 'salaryAdvances' },
   ...CONTACT_PAGES.map(([type, label]) => ({
     group: 'Registers', path: `/contacts/${type}`, label, collection: 'contacts', match: (r) => r.type === type,
   })),

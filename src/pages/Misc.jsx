@@ -288,12 +288,28 @@ export function SetPermission() {
       <Card>
         <Field label="Role" className="max-w-xs mb-5"><Select value={role} onChange={(e) => setRole(e.target.value)} options={PERMISSION_ROLES} /></Field>
 
+        <h5 className="text-[14px] font-semibold text-gray-700 mb-3">Menu access</h5>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 text-[13px]">
+          {MENU.map((m) => (
+            <div key={m.label} className="border rounded p-3">
+              <label className="flex items-center gap-2 font-semibold mb-2">
+                <input type="checkbox" checked={!!perms[key(m.label)]} onChange={() => toggle(m.label)} /> {m.label}
+              </label>
+              {(m.children || []).flatMap((c) => c.children || [c]).map((c) => (
+                <label key={c.label + c.path} className="flex items-center gap-2 pl-5 py-0.5 text-gray-600">
+                  <input type="checkbox" checked={!!perms[key(c.path)]} onChange={() => toggle(c.path)} /> {c.label}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+        <p className="text-[12px] text-gray-500 mt-4 mb-8">Menu access ticks are saved but do not hide menus yet. Edit &amp; Delete ticks below take effect right away.</p>
         <h5 className="text-[14px] font-semibold text-gray-700 mb-1">Edit &amp; Delete</h5>
         <p className="text-[12px] text-gray-500 mb-3">
           Tick what the <b>{role}</b> role may edit or delete. Unticked buttons are hidden, and the server refuses the change.
           Super Admin can always edit and delete.
         </p>
-        <div className="overflow-x-auto mb-8">
+        <div className="overflow-x-auto">
           <table className="w-full min-w-[480px] text-[13px] border">
             <thead className="bg-gray-50">
               <tr>
@@ -327,22 +343,6 @@ export function SetPermission() {
           </table>
         </div>
 
-        <h5 className="text-[14px] font-semibold text-gray-700 mb-3">Menu access</h5>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 text-[13px]">
-          {MENU.map((m) => (
-            <div key={m.label} className="border rounded p-3">
-              <label className="flex items-center gap-2 font-semibold mb-2">
-                <input type="checkbox" checked={!!perms[key(m.label)]} onChange={() => toggle(m.label)} /> {m.label}
-              </label>
-              {(m.children || []).flatMap((c) => c.children || [c]).map((c) => (
-                <label key={c.label + c.path} className="flex items-center gap-2 pl-5 py-0.5 text-gray-600">
-                  <input type="checkbox" checked={!!perms[key(c.path)]} onChange={() => toggle(c.path)} /> {c.label}
-                </label>
-              ))}
-            </div>
-          ))}
-        </div>
-        <p className="text-[12px] text-gray-500 mt-4">Menu access ticks are saved but do not hide menus yet. Edit &amp; Delete ticks above take effect right away.</p>
       </Card>
     </>
   )

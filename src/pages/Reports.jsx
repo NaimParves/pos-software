@@ -459,6 +459,7 @@ const MOVES = {
   expense: ['Expense', 'Against', 'Expense'],
   income: ['Income', 'Against', 'Income'],
   salary: ['Salary', 'Paid to', 'Salary Paid'],
+  salaryAdvance: ['Salary Advance', 'Paid to', 'Salary Advance / Partial Pay'],
 }
 function cashFlows(s) {
   const flows = []
@@ -480,6 +481,7 @@ function cashFlows(s) {
   s.expenses.forEach((e) => add('expense', { ...rec(e), name: e.head, out: num(e.amount) }))
   s.incomes.forEach((e) => add('income', { ...rec(e), name: e.head, in: num(e.amount) }))
   s.paySlips.forEach((p) => add('salary', { ...rec(p), name: p.employeeName, out: num(p.amount) }))
+  ;(s.salaryAdvances || []).forEach((p) => add('salaryAdvance', { ...rec(p), name: p.employeeName, out: num(p.amount) }))
   s.transfers.forEach((t) => {
     const base = { ...rec(t), transfer: true, desc: `From ${t.fromAcc} To ${t.toAcc}` }
     add('transfer', { ...base, method: t.fromAcc, out: num(t.amount) })

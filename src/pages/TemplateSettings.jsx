@@ -1,13 +1,14 @@
 import { useState } from 'react'
-import { Check, Upload, X } from 'lucide-react'
-import { PageHeader, Card, Field, Input, Textarea, Button } from '../components/ui'
+import { Check, ImagePlus, Plus, Trash2, Upload, X } from 'lucide-react'
+import { PageHeader, Card, Field, Input, Select, Textarea, Button, Modal } from '../components/ui'
+import { DEALER_BRANDS, INVOICE_TERMS } from '../config/shop'
 import InvoicePrint from '../components/InvoicePrint'
 import VoucherPrint from '../components/VoucherPrint'
 import { toast } from '../components/Toast'
 import { db, useCollection } from '../store/db'
 import { useShop } from '../store/shop'
 import { useUser } from '../store/auth'
-import { TEMPLATE_CATEGORIES, DESIGNS, blankTemplate, DEFAULT_COLOR } from '../config/templates'
+import { TEMPLATE_CATEGORIES, DESIGNS, blankTemplate, DEFAULT_COLOR, GRADIENT_DIRECTIONS, MEMO_KINDS, paint } from '../config/templates'
 import { today } from '../utils/format'
 
 const VOUCHER_KINDS = ['receive', 'pay', 'customerSettlement', 'supplierSettlement']
@@ -19,7 +20,7 @@ const SAMPLE_DOC = {
   ],
   subTotal: 5820, discount: 20, laborCost: 40, invoiceAmount: 5840, previousDue: 0, paid: 5000, due: 840, note: '',
 }
-const SAMPLE_VOUCHER = { number: 'RCV-0001', date: today(), contactName: 'Sample Customer', phone: '01700000000', address: 'Main Road', amount: 5000, discount: 0, method: 'Cash', note: 'Due collection' }
+const SAMPLE_VOUCHER = { number: 'RCV-0001', date: today(), contactName: 'Sample Customer', phone: '01700000000', address: 'Main Road', amount: 5000, discount: 0, method: 'Cash', note: 'Due collection', previousDue: 5840, dueAfter: 840 }
 const TITLES = { sale: 'Invoice', salesReturn: 'Sales Return', directReturn: 'Direct Return', purchase: 'Purchase', receive: 'Money Receipt', pay: 'Payment Voucher', customerSettlement: 'Customer Settlement', supplierSettlement: 'Supplier Settlement' }
 
 function readImage(file, done) {
@@ -50,7 +51,8 @@ export default function TemplateSettings() {
   const record = useCollection('templateSettings')[0] || null
   const saved = record || { categories: {}, header: {}, useForAll: false }
   const [tab, setTab] = useState('sale')
-  const [draft, setDraft] = useState(() => ({ ...blankTemplate(), ...(saved.categories?.[tab] || {}) }))
+  const [draft, setDraft] = useState(() => ({ ...blankTemplate(tab), ...(saved.categories?.[tab] || {}) }))
+  const [dialog, setDialog] = useState('') // 'dealers' | 'terms'
   const [header, setHeader] = useState(() => ({ ...(saved.header || {}) }))
   const [useForAll, setUseForAll] = useState(!!saved.useForAll && saved.allKind === tab)
   const shop = useShop()
@@ -58,7 +60,7 @@ export default function TemplateSettings() {
   const open = (key) => {
     setTab(key)
     if (key !== 'header') {
-      setDraft({ ...blankTemplate(), ...(saved.categories?.[key] || {}) })
+      setDraft({ ...blankTemplate(key), ...(saved.categories?.[key] || {}) })
       setUseForAll(!!saved.useForAll && saved.allKind === key)
     }
   }
@@ -153,29 +155,60 @@ export default function TemplateSettings() {
                     ))}
                   </div>
                 </div>
+                {/* gradient colour system */}
+                <div className="rounded border p-3 space-y-2">
+                  <label className="flex items-center gap-2 text-[13px] font-medium">
+                    <input type="checkbox" checked={!!draft.gradient} onChange={(e) => set('gradient', e.target.checked)} /> Gradient Color System
+                  </label>
+                  {draft.gradient && (
+                    <div className="flex flex-wrap items-end gap-3">
+                      <Field label="Second colour"><input type="color" value={draft.color2 || '#f1b44c'} onChange={(e) => set('color2', e.target.value)} className="h-9 w-16 border rounded cursor-pointer" /></Field>
+                      <Field label="Direction" className="flex-1 min-w-[200px]">
+                        <Select value={draft.direction || 'to right'} onChange={(e) => set('direction', e.target.value)} options={GRADIENT_DIRECTIONS} />
+                      </Field>
+                    </div>
+                  )}
+                  {draft.gradient && (
+                    <div className="flex flex-wrap gap-2">
+                      {GRADIENT_DIRECTIONS.map((d) => (
+                        <button key={d.value} type="button" title={d.label} onClick={() => set('direction', d.value)}
+                          className={`w-14 h-9 rounded border-2 ${draft.direction === d.value ? 'border-gray-800' : 'border-transparent'}`}
+                          style={{ background: paint({ ...draft, direction: d.value }) }} />
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <Field label="Document Title (empty = default)"><Input value={draft.title} placeholder={TITLES[tab]} onChange={(e) => set('title', e.target.value)} /></Field>
                 <Field label="Header Line (dealer info, slogan…)"><Input value={draft.headerNote} onChange={(e) => set('headerNote', e.target.value)} /></Field>
                 <Field label="Footer Note"><Textarea rows={2} value={draft.footerNote} onChange={(e) => set('footerNote', e.target.value)} /></Field>
-                <div className="flex flex-wrap items-center gap-3">
-                  {draft.banner && <img src={draft.banner} alt="Banner" className="h-12 border rounded" />}
+                <div className="flex flex-wrap items-center gap-2">
                   <label className="inline-flex items-center gap-2 cursor-pointer bg-primary text-white rounded px-3 py-[7px] text-[13px]">
                     <Upload size={14} /> Upload Banner
-                    <input type="file" accept="image/*" className="hidden" onChange={(e) => readImage(e.target.files?.[0], (v) => set('banner', v))} />
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => { readImage(e.target.files?.[0], (v) => set('banner', v)); e.target.value = '' }} />
                   </label>
-                  {draft.banner && <Button color="secondary" onClick={() => set('banner', '')}><X size={14} /> Remove</Button>}
+                  <Button color="danger" disabled={!draft.banner} onClick={() => set('banner', '')} title="Go back to the normal header"><X size={14} /> Remove Upload Banner</Button>
+                  {draft.banner && <img src={draft.banner} alt="Banner" className="h-10 border rounded" />}
                 </div>
-                {!VOUCHER_KINDS.includes(tab) && (
-                  <div className="flex flex-wrap gap-4 text-[13px]">
-                    <label className="flex items-center gap-2"><input type="checkbox" checked={draft.showTerms !== false} onChange={(e) => set('showTerms', e.target.checked)} /> Show terms</label>
-                    <label className="flex items-center gap-2"><input type="checkbox" checked={draft.showDealers !== false} onChange={(e) => set('showDealers', e.target.checked)} /> Show dealer logos</label>
-                  </div>
-                )}
+                <p className="text-[11px] text-gray-500 -mt-1">A banner replaces the whole top of the memo: only the banner is printed there, nothing from the software. Remove it to go back to the normal header.</p>
+                <div className="flex flex-wrap gap-4 text-[13px]">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={draft.showTerms !== false} onChange={(e) => { set('showTerms', e.target.checked); if (e.target.checked) setDialog('terms') }} /> Show terms
+                  </label>
+                  {draft.showTerms !== false && <button type="button" className="text-primary text-[12px] underline" onClick={() => setDialog('terms')}>Edit terms</button>}
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={draft.showDealers !== false} onChange={(e) => { set('showDealers', e.target.checked); if (e.target.checked) setDialog('dealers') }} /> Show dealer logos
+                  </label>
+                  {draft.showDealers !== false && <button type="button" className="text-primary text-[12px] underline" onClick={() => setDialog('dealers')}>Edit logos</button>}
+                  {MEMO_KINDS.includes(tab) && (
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={!!draft.twoColumn} onChange={(e) => set('twoColumn', e.target.checked)} /> Two Column Layout</label>
+                  )}
+                </div>
                 <label className="flex items-center gap-2 text-[13px] font-medium pt-2 border-t">
                   <input type="checkbox" checked={useForAll} onChange={(e) => setUseForAll(e.target.checked)} /> Use this design for all categories
                 </label>
                 <div className="flex gap-2 pt-1">
                   <Button onClick={saveCategory} disabled={!isAdmin}>Save</Button>
-                  <Button color="secondary" onClick={() => setDraft(blankTemplate())}>Reset to default</Button>
+                  <Button color="secondary" onClick={() => setDraft(blankTemplate(tab))}>Reset to default</Button>
                 </div>
               </div>
             </Card>
@@ -183,8 +216,84 @@ export default function TemplateSettings() {
               <Preview kind={tab} template={draft} scale={0.62} height={680} />
             </Card>
           </div>
+          <Modal open={dialog === 'dealers'} onClose={() => setDialog('')} title="Dealer Logos" wide>
+            {dialog === 'dealers' && (
+              <DealersEditor value={draft.dealers ?? DEALER_BRANDS} onCancel={() => setDialog('')}
+                onSave={(list) => { setDraft((d) => ({ ...d, dealers: list, showDealers: true })); setDialog('') }} />
+            )}
+          </Modal>
+          <Modal open={dialog === 'terms'} onClose={() => setDialog('')} title="Terms & Conditions" wide>
+            {dialog === 'terms' && (
+              <TermsEditor value={draft.terms ?? INVOICE_TERMS} onCancel={() => setDialog('')}
+                onSave={(list) => { setDraft((d) => ({ ...d, terms: list, showTerms: true })); setDialog('') }} />
+            )}
+          </Modal>
         </>
       )}
     </>
+  )
+}
+
+// Dealer logos shown on the memo: add, rename, replace or remove. They are
+// scaled to share one row, whatever their size or number.
+function DealersEditor({ value, onSave, onCancel }) {
+  const [list, setList] = useState(() => value.map((d) => ({ ...d })))
+  const upd = (i, patch) => setList((l) => l.map((d, j) => (j === i ? { ...d, ...patch } : d)))
+  return (
+    <div>
+      <p className="text-[12px] text-gray-500 mb-3">Logos are resized automatically to fit the dealer row of the memo.</p>
+      <div className="space-y-2 max-h-[55vh] overflow-y-auto">
+        {list.map((d, i) => (
+          <div key={i} className="flex items-center gap-3 border rounded p-2">
+            <div className="w-28 h-14 border rounded bg-gray-50 flex items-center justify-center shrink-0">
+              {d.logo ? <img src={d.logo} alt={d.name} className="max-h-12 max-w-[100px] object-contain" /> : <span className="text-[11px] text-gray-400">No logo</span>}
+            </div>
+            <Input value={d.name} placeholder="Brand name" onChange={(e) => upd(i, { name: e.target.value })} />
+            <label className="inline-flex items-center gap-1 cursor-pointer border rounded px-2 py-[7px] text-[12px] whitespace-nowrap">
+              <ImagePlus size={14} /> {d.logo ? 'Replace' : 'Upload'}
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => readImage(e.target.files?.[0], (v) => upd(i, { logo: v }))} />
+            </label>
+            <Button color="danger" className="!px-2" title="Remove" onClick={() => setList((l) => l.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
+          </div>
+        ))}
+        {!list.length && <p className="text-[13px] text-gray-500">No dealer logos. Add one below.</p>}
+      </div>
+      <div className="flex flex-wrap justify-between gap-2 mt-4">
+        <label className="inline-flex items-center gap-2 cursor-pointer bg-success text-white rounded px-3 py-[7px] text-[13px]">
+          <Plus size={14} /> Add Logo
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => { readImage(e.target.files?.[0], (v) => setList((l) => [...l, { name: e.target.files?.[0]?.name?.replace(/\.[^.]+$/, '') || 'Brand', logo: v }])); }} />
+        </label>
+        <div className="flex gap-2">
+          <Button color="secondary" onClick={onCancel}>Cancel</Button>
+          <Button onClick={() => onSave(list.filter((d) => d.logo))}>Save &amp; Show</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Terms printed under the memo: edit, add or remove lines
+function TermsEditor({ value, onSave, onCancel }) {
+  const [list, setList] = useState(() => [...value])
+  return (
+    <div>
+      <div className="space-y-2 max-h-[55vh] overflow-y-auto">
+        {list.map((x, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <span className="pt-2 text-[13px] text-gray-500 w-5">{i + 1}.</span>
+            <Textarea rows={2} value={x} onChange={(e) => setList((l) => l.map((y, j) => (j === i ? e.target.value : y)))} />
+            <Button color="danger" className="!px-2 mt-1" title="Remove" onClick={() => setList((l) => l.filter((_, j) => j !== i))}><Trash2 size={14} /></Button>
+          </div>
+        ))}
+        {!list.length && <p className="text-[13px] text-gray-500">No terms. Add one below.</p>}
+      </div>
+      <div className="flex flex-wrap justify-between gap-2 mt-4">
+        <Button color="success" onClick={() => setList((l) => [...l, ''])}><Plus size={14} /> Add Term</Button>
+        <div className="flex gap-2">
+          <Button color="secondary" onClick={onCancel}>Cancel</Button>
+          <Button onClick={() => onSave(list.map((x) => x.trim()).filter(Boolean))}>Save &amp; Show</Button>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -39,5 +39,5 @@ export function useShop() {
 export function useTemplate(kind) {
   const settings = useCollection('templateSettings')[0] || {}
   const key = settings.useForAll ? settings.allKind || 'sale' : kind
-  return { ...blankTemplate(), ...(settings.categories?.[key] || {}) }
+  return { ...blankTemplate(key), ...(settings.categories?.[key] || {}) }
 }

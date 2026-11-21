@@ -1,5 +1,6 @@
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { CheckCircle2, Clock, FileText, Loader } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, FileText, HandCoins, Loader, Receipt, Truck } from 'lucide-react'
+import { StatCard } from './StatCard'
 import { deliveryState } from './Delivery'
 import { displayDate, money, num, today } from '../utils/format'
 
@@ -49,9 +50,7 @@ function amounts(kind, rows) {
   return []
 }
 
-const TONE = {
-  primary: 'bg-primary/10 text-primary', success: 'bg-success/10 text-success', info: 'bg-info/10 text-info', warning: 'bg-warning/15 text-[#b07d24]',
-}
+const TONE = { primary: 'indigo', success: 'green', info: 'sky', warning: 'amber' }
 
 export default function ListDashboard({ kind, rows, from, to }) {
   const cards = counts(kind, rows)
@@ -63,23 +62,15 @@ export default function ListDashboard({ kind, rows, from, to }) {
       <p className="text-[12px] font-semibold uppercase tracking-wide text-gray-500 mb-2">Summary · {period}</p>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {cards.map(([label, value, tone, Icon]) => (
-          <div key={label} className="bg-white rounded shadow-sm p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[12px] text-gray-500">{label}</p>
-              <p className="text-2xl font-semibold text-gray-700 mt-1">{value}</p>
-            </div>
-            <span className={`w-11 h-11 rounded-full flex items-center justify-center ${TONE[tone]}`}><Icon size={20} /></span>
-          </div>
+          <StatCard key={label} label={label} value={value} currency={false} icon={Icon} tone={TONE[tone]} />
         ))}
       </div>
       {money3.length > 0 && (
         <div className="grid lg:grid-cols-[1fr_1.4fr] gap-4 mt-4">
-          <div className="bg-white rounded shadow-sm p-4 space-y-3">
-            {money3.map(([label, value, color]) => (
-              <div key={label} className="flex items-center justify-between border-b last:border-0 pb-2 last:pb-0">
-                <span className="flex items-center gap-2 text-[13px] text-gray-600"><span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />{label}</span>
-                <span className="font-semibold text-gray-700">{money(value)}</span>
-              </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {money3.map(([label, value], i) => (
+              <StatCard key={label} label={label} value={value} icon={[Receipt, Truck, HandCoins, AlertCircle][i] || Receipt}
+                tone={/Due/.test(label) ? (value > 0 ? 'red' : 'green') : /Paid|Given/.test(label) ? 'green' : /Received/.test(label) ? 'sky' : 'indigo'} />
             ))}
           </div>
           <div className="bg-white rounded shadow-sm p-4 h-[190px]" aria-label="Money chart">
