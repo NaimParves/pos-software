@@ -79,10 +79,11 @@ export const MENU = [
   },
   {
     label: 'Payroll', icon: Wallet, children: [
-      { label: 'List of Salary Sheet', path: '/payroll/process-monthly-salary' },
       { label: 'Process Salary Sheet', path: '/payroll/process-monthly-salary/create' },
+      { label: 'List of Salary Sheet', path: '/payroll/process-monthly-salary' },
       { label: 'Pay Slip', path: '/payroll/pay-slip' },
       { label: 'List of Pay Slip', path: '/payroll/pay-slip/all-pay-slips' },
+      { label: 'Employee Advance / Partial Pay', path: '/payroll/employee-advance' },
     ],
   },
   {

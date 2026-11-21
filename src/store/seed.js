@@ -83,7 +83,7 @@ export const seed = () => ({
   messages: [], phoneBook: [], sentMessages: [], permissions: [],
   attendance: [], leaves: [], salarySheets: [], paySlips: [],
   salaryGrades: [], salaryStatements: [], holidays: [], shifts: [],
-  quotations: [], loans: [], stockAdjustments: [], templateSettings: [],
+  quotations: [], loans: [], stockAdjustments: [], templateSettings: [], salaryAdvances: [],
 })
 
 function mkInvoice(id, number, date, contactId, contactName, items, paid) {

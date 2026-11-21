@@ -11,7 +11,7 @@ const COLLECTIONS = [
   'expenses', 'incomes', 'transfers', 'payments', 'settlements', 'accountHeads', 'branches', 'users',
   'messages', 'phoneBook', 'sentMessages', 'permissions', 'attendance', 'leaves', 'salarySheets',
   'paySlips', 'salaryGrades', 'salaryStatements', 'holidays', 'shifts',
-  'quotations', 'loans', 'stockAdjustments', 'templateSettings',
+  'quotations', 'loans', 'stockAdjustments', 'templateSettings', 'salaryAdvances',
 ]
 const empty = () => Object.fromEntries(COLLECTIONS.map((c) => [c, []]))
 

@@ -29,7 +29,32 @@ export const DESIGNS = [
 
 export const DEFAULT_COLOR = '#ec6a1f'
 
-export const blankTemplate = () => ({ design: 'classic', color: DEFAULT_COLOR, banner: '', title: '', headerNote: '', footerNote: '', showTerms: true, showDealers: true })
+// dealers / terms: null = use the defaults from config/shop.js
+// Memos show dealer logos and terms unless switched off; money receipts only when switched on.
+export const blankTemplate = (kind = 'sale') => ({
+  design: 'classic', color: DEFAULT_COLOR, banner: '', title: '', headerNote: '', footerNote: '',
+  showTerms: MEMO_KINDS.includes(kind), showDealers: MEMO_KINDS.includes(kind),
+  dealers: null, terms: null, gradient: false, color2: '#f1b44c', direction: 'to right', twoColumn: false,
+})
+
+export const GRADIENT_DIRECTIONS = [
+  { value: 'to bottom', label: 'Top → Bottom' },
+  { value: 'to right', label: 'Left → Right' },
+  { value: 'to bottom right', label: 'Corner ↘ (top-left to bottom-right)' },
+  { value: 'to top right', label: 'Corner ↗ (bottom-left to top-right)' },
+  { value: 'radial', label: 'Centre → Edges (radial)' },
+]
+
+// The colour to paint headers, bands and table heads with (plain or gradient)
+export function paint(t, fallback = DEFAULT_COLOR) {
+  const c1 = t?.color || fallback
+  if (!t?.gradient) return c1
+  const c2 = t.color2 || '#f1b44c'
+  return t.direction === 'radial' ? `radial-gradient(circle, ${c1}, ${c2})` : `linear-gradient(${t.direction || 'to right'}, ${c1}, ${c2})`
+}
+
+// Template categories that print an invoice-style memo (the others print a money receipt)
+export const MEMO_KINDS = ['sale', 'salesReturn', 'directReturn', 'purchase']
 
 // collection of a saved document -> template category
 export function templateKindOf(collection, doc) {

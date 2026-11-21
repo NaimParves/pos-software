@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { CreditCard, Pencil, Plus, Printer, Search, Trash2, User } from 'lucide-react'
+import { HandCoins, Landmark, Pencil, Plus, Printer, Receipt, Search, Trash2, Wallet } from 'lucide-react'
+import { StatCard, PersonCard } from '../components/StatCard'
 import { PageHeader, Card, Field, Input, Select, Button, Modal } from '../components/ui'
 import VoucherPrint from '../components/VoucherPrint'
 import { QuickContact } from './InvoiceForm'
@@ -117,6 +118,7 @@ export default function AccountsPayment({ mode }) {
       ...(editing && m.settlement ? { refund: !!editing.refund } : {}), // an old write-off stays a write-off
       date: f.date, contactId: f.contactId, contactName: contact.name, amount: amt,
       method: f.method, info: f.info, note: f.note, sms: f.sms,
+      previousDue: round2(due), dueAfter: after,
       ...(m.discount ? { discount: disc } : {}),
     }
     const rec = editing ? await db.update(m.collection, editing.id, row) : await db.insert(m.collection, row, { number: m.number })
@@ -131,7 +133,7 @@ export default function AccountsPayment({ mode }) {
       db.insert('sentMessages', { date: today(), phone: contact.phone, name: contact.name, body })
     }
     toast.success(`${m.title} ${rec.number || ''} ${editing ? 'updated' : 'saved'}.`)
-    if (print) setPrintRec({ ...rec, phone: contact.phone, address: contact.address, balanceAfter: after })
+    if (print) setPrintRec({ ...rec, phone: contact.phone, address: contact.address })
     reset()
   }
 
@@ -167,9 +169,18 @@ export default function AccountsPayment({ mode }) {
       ),
     }],
   ]
+  // Receipts show the due before and after the payment. Older records did not
+  // store it, so it is worked out from today's balance without this record.
   const withContact = (r) => {
     const c = s.contacts.find((x) => x.id === r.contactId)
-    return { ...r, phone: c?.phone || '', address: c?.address || '' }
+    let { previousDue, dueAfter } = r
+    if (previousDue === undefined && c) {
+      const without = { ...s, [m.collection]: s[m.collection].filter((x) => x.id !== r.id) }
+      const bal = summaryOf(c, without).balance
+      previousDue = round2(m.settlement ? -bal : bal)
+      dueAfter = round2(m.loan && m.advance ? previousDue + num(r.amount) : previousDue - num(r.amount) - num(r.discount))
+    }
+    return { ...r, phone: c?.phone || '', address: c?.address || '', previousDue, dueAfter }
   }
   const totals = { amount: rows.reduce((a, r) => a + num(r.amount), 0), discount: rows.reduce((a, r) => a + num(r.discount), 0) }
 
@@ -213,23 +224,20 @@ export default function AccountsPayment({ mode }) {
 
       {/* mini dashboard */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded shadow-sm p-4 flex items-center gap-3">
-          <span className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 shrink-0"><User size={18} /></span>
-          <div className="text-[13px] min-w-0">
-            <p className="font-semibold text-gray-700 truncate">{contact ? contact.name : `No ${m.party.toLowerCase()} selected`}</p>
-            {contact && <p className="text-gray-500 truncate">{[contact.phone, contact.address].filter(Boolean).join(' | ')}</p>}
-          </div>
-        </div>
+        <PersonCard person={contact} badge={m.loan ? 'Active Lender' : null}
+          emptyText={listed.length ? `No ${m.party.toLowerCase()} selected — pick one above to see the figures.` : m.empty} />
         {m.cards.map((label, i) => {
           const v = !sum ? 0 : i === 0 ? sum.billed : i === 1 ? sum.received : m.settlement ? -sum.balance : sum.balance
+          const tone = i === 0 ? 'indigo' : i === 1 ? 'green' : v > 0 ? (m.settlement ? 'amber' : 'red') : v < 0 ? 'green' : 'amber'
+          const Icon = [m.loan ? Landmark : Receipt, HandCoins, Wallet][i]
+          const caption = i === 0 ? (m.loan ? 'Principal amount' : m.types.includes('supplier') ? 'Purchases + opening' : 'Sales + opening')
+            : i === 1 ? (m.loan ? 'Repaid so far' : 'Payments, returns, discounts')
+              : v < 0 && !m.loan ? 'Advance held' : m.loan ? 'Remaining payable' : 'Remaining'
+          // the last card can fill the Amount box with the outstanding figure
+          const canFill = i === 2 && contact && !m.advance && Math.abs(v) > 0
           return (
-            <div key={label} className="bg-white rounded shadow-sm p-4 flex items-center justify-between">
-              <div>
-                <p className="text-[12px] text-gray-500">{label}</p>
-                <p className={`text-lg font-semibold mt-1 ${i === 2 && v > 0 ? 'text-danger' : i === 2 && v < 0 ? 'text-success' : 'text-gray-700'}`}>{money(Math.abs(v))}{i === 2 && v < 0 && !m.loan ? <span className="text-[12px] font-normal"> advance</span> : ''}</p>
-              </div>
-              <span className="w-11 h-11 rounded bg-primary text-white flex items-center justify-center"><CreditCard size={18} /></span>
-            </div>
+            <StatCard key={label} label={label} value={Math.abs(v)} tone={tone} icon={Icon} caption={caption}
+              action={canFill && <button type="button" className="text-[11px] font-medium text-primary underline mt-1" onClick={() => set('amount', String(round2(Math.abs(v))))}>Auto-Fill {m.settlement ? 'Advance' : 'Due'}</button>} />
           )
         })}
       </div>

@@ -20,7 +20,6 @@ const activeHead = (type) => (a) => a.type === type && a.status !== 'Inactive'
 const method = { key: 'method', label: 'Paid Through', type: 'select', options: PAYMENT_METHODS, required: true }
 const employee = { key: 'employeeId', label: 'Employee', type: 'combo', required: true, from: { collection: 'contacts', filter: (c) => c.type === 'employee', value: 'id', label: 'name' }, hideInList: true }
 const empName = (r, s) => ({ ...r, employeeName: s.contacts.find((c) => c.id === r.employeeId)?.name || '' })
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
 // path -> page config
 export const CRUD_PAGES = {
@@ -130,15 +129,6 @@ export const CRUD_PAGES = {
     fields: [{ key: 'name', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'role', label: 'Role' }, { key: 'branch', label: 'Branch' }, { key: 'status', label: 'Status' }],
   },
 
-  '/attendance/manual-attendance': {
-    title: 'Manual Attendance', collection: 'attendance', dateKey: 'date', transform: empName,
-    columns: [{ key: 'date', label: 'Date', type: 'date' }, { key: 'employeeName', label: 'Employee' }, { key: 'status', label: 'Status' }, { key: 'inTime', label: 'In' }, { key: 'outTime', label: 'Out' }],
-    fields: [
-      { key: 'date', label: 'Date', type: 'date', default: 'today', required: true }, employee,
-      { key: 'status', label: 'Status', type: 'select', options: ['Present', 'Absent', 'Late', 'Leave'], default: 'Present', required: true },
-      { key: 'inTime', label: 'In Time', type: 'time' }, { key: 'outTime', label: 'Out Time', type: 'time' },
-    ],
-  },
   '/attendance/leave-application/create': {
     title: 'Add Leave Application', collection: 'leaves', formOnly: true, transform: empName, defaults: { approval: 'Pending' },
     fields: [
@@ -169,31 +159,5 @@ export const CRUD_PAGES = {
     title: 'Salary Statements', collection: 'salaryStatements', transform: empName,
     columns: [{ key: 'employeeName', label: 'Employee' }, { key: 'grade', label: 'Grade' }, { key: 'gross', label: 'Gross', type: 'number', money: true }],
     fields: [employee, { key: 'grade', label: 'Grade', type: 'select', from: { collection: 'salaryGrades' } }, { key: 'gross', label: 'Gross Salary', type: 'number', required: true }],
-  },
-  '/payroll/process-monthly-salary': {
-    title: 'List of Salary Sheet', collection: 'salarySheets', listOnly: true,
-    fields: [{ key: 'month', label: 'Month' }, { key: 'year', label: 'Year' }, { key: 'employeeName', label: 'Employee' }, { key: 'amount', label: 'Net Salary', type: 'number', money: true }],
-  },
-  '/payroll/process-monthly-salary/create': {
-    title: 'Process Salary Sheet', collection: 'salarySheets', formOnly: true,
-    transform: (r, s) => { const e = s.contacts.find((c) => c.id === r.employeeId); return { ...r, employeeName: e?.name, amount: r.amount || e?.salary || 0 } },
-    help: 'Leave Net Salary empty to use the salary saved on the employee.',
-    fields: [
-      employee, { key: 'month', label: 'Month', type: 'select', options: MONTHS, required: true, default: MONTHS[new Date().getMonth()] },
-      { key: 'year', label: 'Year', type: 'number', default: new Date().getFullYear(), required: true },
-      { key: 'amount', label: 'Net Salary', type: 'number' },
-    ],
-  },
-  '/payroll/pay-slip': {
-    title: 'Pay Slip', collection: 'paySlips', formOnly: true, number: 'SLIP', transform: empName,
-    fields: [
-      { key: 'date', label: 'Date', type: 'date', default: 'today', required: true }, employee,
-      { key: 'month', label: 'Month', type: 'select', options: MONTHS, required: true },
-      { key: 'amount', label: 'Paid Amount', type: 'number', required: true }, { ...method, default: 'Cash' },
-    ],
-  },
-  '/payroll/pay-slip/all-pay-slips': {
-    title: 'List of Pay Slip', collection: 'paySlips', listOnly: true, number: 'SLIP',
-    fields: [{ key: 'date', label: 'Date', type: 'date' }, { key: 'employeeName', label: 'Employee' }, { key: 'month', label: 'Month' }, { key: 'amount', label: 'Amount', type: 'number', money: true }, { key: 'method', label: 'Through' }],
   },
 }

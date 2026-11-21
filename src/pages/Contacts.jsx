@@ -1,18 +1,19 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { MoreHorizontal, User } from 'lucide-react'
-import { PageHeader, Card, Field, Input, Button } from '../components/ui'
+import { PageHeader, Card, Field, Input, Select, Button } from '../components/ui'
 import DataTable from '../components/DataTable'
 import { db, useCollection } from '../store/db'
 import { useCan } from '../store/permissions'
 
 const LABEL = { customer: 'Customer', retailer: 'Retailer', supplier: 'Supplier', employee: 'Employee', reference: 'Reference', lender: 'Lender' }
-const blank = { name: '', organization: '', address: '', phone: '', altPhone: '', nid: '', openingBalance: '', designation: '', salary: '', image: '' }
+const blank = { name: '', organization: '', address: '', phone: '', altPhone: '', nid: '', openingBalance: '', designation: '', salary: '', branch: '', image: '' }
 
 export default function Contacts() {
   const { type } = useParams()
   const label = LABEL[type] || 'Contact'
   const all = useCollection('contacts')
+  const branches = useCollection('branches')
   const rows = all.filter((c) => c.type === type)
   const [f, setF] = useState(blank)
   const [editId, setEditId] = useState(null)
@@ -73,7 +74,8 @@ export default function Contacts() {
           <Field label="NID Number"><Input placeholder="Enter NID Number" value={f.nid} onChange={set('nid')} /></Field>
           {type === 'employee' ? <>
             <Field label="Designation"><Input placeholder="Designation" value={f.designation} onChange={set('designation')} /></Field>
-            <Field label="Monthly Salary"><Input type="number" placeholder="Salary" value={f.salary} onChange={set('salary')} /></Field>
+            <Field label="Monthly Salary (Basic)"><Input type="number" placeholder="Salary" value={f.salary} onChange={set('salary')} /></Field>
+            <Field label="Branch / Showroom"><Select value={f.branch || ''} onChange={set('branch')} placeholder="--Select Branch--" options={branches.map((b) => b.name)} /></Field>
           </> : (
             <Field label="Opening Balance"><Input type="number" placeholder="Enter Opening Balance" value={f.openingBalance} onChange={set('openingBalance')} /></Field>
           )}

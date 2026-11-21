@@ -16,7 +16,7 @@ import { displayDate, inRange, money, num, round2, sftPerPiece, today } from '..
 // Sales Return / Direct Return / Purchase Return.
 // With an invoice (sales & purchase return) the invoice's lines are shown
 // locked, and only the returned Cart / PCS / Return SFT can be typed.
-// Below: Less (what is kept back), Ret. Amount and Return Paid (cash given
+// Below: Previous Discount (the return's share of the invoice discount), Return Amount and Return Paid (cash given
 // back now; the rest is taken off the party's due).
 
 const unitsOf = (p) => ({ per: num(p?.pcsPerCart) || 1, sft: p?.kind === 'Tiles' ? sftPerPiece(p.size) : 0 })
@@ -108,6 +108,8 @@ function ReturnEditor({ mode, editId, sourceParam }) {
     return cfg.source ? [] : [emptyDirect()]
   })
   const [less, setLess] = useState(e0.less ?? '')
+  // Previous Discount follows the invoice's discount until it is typed over
+  const [lessTouched, setLessTouched] = useState(!!editDoc)
   const [retPaid, setRetPaid] = useState(e0.paid ?? '')
   const [method, setMethod] = useState(e0.payments?.[0]?.method || 'Cash')
   const [payNote, setPayNote] = useState(e0.payments?.[0]?.note || '')
@@ -147,14 +149,17 @@ function ReturnEditor({ mode, editId, sourceParam }) {
   const totals = useMemo(() => {
     const amount = (l) => round2(num(l.qty) * num(l.rate))
     const value = round2(lines.reduce((a, l) => a + amount(l), 0))
-    const lessAmt = round2(num(less))
+    // the share of the original invoice discount that belongs to the goods coming back
+    const share = source && num(source.subTotal) > 0 ? round2((num(source.discount) * value) / num(source.subTotal)) : 0
+    const lessAmt = lessTouched || !source ? round2(num(less)) : share
     const retAmount = Math.round(value - lessAmt)
     const paid = round2(num(retPaid))
-    return { amount, value, less: lessAmt, retAmount, paid, toDue: round2(retAmount - paid) }
-  }, [lines, less, retPaid])
+    return { amount, value, less: lessAmt, share, retAmount, paid, toDue: round2(retAmount - paid) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, less, retPaid, lessTouched, sourceId])
 
   const reset = () => {
-    setSourceId(''); setContactId(''); setNote(''); setLess(''); setRetPaid(''); setPayNote(''); setError('')
+    setSourceId(''); setContactId(''); setNote(''); setLess(''); setLessTouched(false); setRetPaid(''); setPayNote(''); setError('')
     setLines(cfg.source ? [] : [emptyDirect()])
   }
 
@@ -165,8 +170,8 @@ function ReturnEditor({ mode, editId, sourceParam }) {
     const over = items.find((l) => locked && num(l.qty) > l.left + EPS)
     if (over) { setError(`${over.name}: only ${over.left} can be returned (sold ${over.sold.qty}, already returned ${round2(over.sold.qty - over.left)}).`); return }
     if (!locked && items.some((l) => !(num(l.rate) >= 0) || l.rate === '')) { setError('Every product needs a rate.'); return }
-    if (totals.less < 0 || totals.less > totals.value) { setError('Less must be between 0 and the return value.'); return }
-    if (totals.paid < 0 || totals.paid > totals.retAmount) { setError('Return Paid cannot be more than the Ret. Amount.'); return }
+    if (totals.less < 0 || totals.less > totals.value) { setError('Previous Discount must be between 0 and the Invoice Amount.'); return }
+    if (totals.paid < 0 || totals.paid > totals.retAmount) { setError('Return Paid cannot be more than the Return Amount.'); return }
     if (saving) return
     setSaving(true)
     setError('')
@@ -185,7 +190,7 @@ function ReturnEditor({ mode, editId, sourceParam }) {
           ...(locked ? { sourceIndex: l.sourceIndex } : {}),
         }
       }),
-      subTotal: totals.value, vat: 0, less: totals.less, discount: totals.less, discountNote: totals.less ? 'Less' : '',
+      subTotal: totals.value, vat: 0, less: totals.less, discount: totals.less, discountNote: '',
       laborCost: 0, invoiceAmount: totals.retAmount, previousDue: prevDue,
       payments: totals.paid > 0 ? [{ amount: totals.paid, method, info: '', note: payNote }] : [],
       paid: totals.paid, given: totals.paid, change: 0, due: totals.toDue,
@@ -309,9 +314,9 @@ function ReturnEditor({ mode, editId, sourceParam }) {
             )}
           </div>
           <div className="space-y-2">
-            <Row label="Return Value"><Input value={money(totals.value)} readOnly /></Row>
-            <Row label="Less"><Input type="number" min="0" placeholder="0" value={less} onChange={(e) => setLess(e.target.value)} onFocus={(e) => e.target.select()} /></Row>
-            <Row label="Ret. Amount"><Input value={money(totals.retAmount)} readOnly className="!font-semibold" /></Row>
+            <Row label="Invoice Amount"><Input value={money(totals.value)} readOnly /></Row>
+            <Row label="Prev. Discount"><Input type="number" min="0" placeholder="0" value={lessTouched || !locked ? less : totals.share || ''} onChange={(e) => { setLessTouched(true); setLess(e.target.value) }} onFocus={(e) => e.target.select()} title="This return's share of the discount given on the invoice" /></Row>
+            <Row label="Return Amount"><Input value={money(totals.retAmount)} readOnly className="!font-semibold" /></Row>
             <Row label="Return Paid"><Input type="number" min="0" placeholder="0" value={retPaid} onChange={(e) => setRetPaid(e.target.value)} onFocus={(e) => e.target.select()} /></Row>
           </div>
           <div className="space-y-2">
@@ -321,7 +326,7 @@ function ReturnEditor({ mode, editId, sourceParam }) {
             {contact && <Row label="Balance After"><Input value={money(prevDue - totals.toDue)} readOnly /></Row>}
           </div>
           <p className="md:col-span-3 text-[12px] text-gray-500">
-            Less = amount kept back from the return. Ret. Amount = Return Value − Less. Return Paid = cash {isSupplier ? 'received from the supplier' : 'given back to the customer'} now; the rest is taken off the {partyLabel.toLowerCase()}&apos;s due.
+            Invoice Amount = value of the goods coming back. Previous Discount = their share of the invoice&apos;s discount (filled in for you; you can change it). Return Amount = Invoice Amount − Previous Discount. Return Paid = cash {isSupplier ? 'received from the supplier' : 'given back to the customer'} now; the rest is taken off the {partyLabel.toLowerCase()}&apos;s due.
           </p>
         </div>
 

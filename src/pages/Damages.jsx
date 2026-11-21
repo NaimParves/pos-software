@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Boxes, CircleDollarSign, Eye, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react'
 import { PageHeader, Card, Field, Input, Button, Modal } from '../components/ui'
+import { StatCard } from '../components/StatCard'
 import Combo from '../components/Combo'
 import DataTable from '../components/DataTable'
 import InvoicePrint from '../components/InvoicePrint'
@@ -169,20 +170,17 @@ export function DamageList() {
   const totals = { qty: round2(rows.reduce((x, d) => x + d.qtyTotal, 0)), items: rows.reduce((x, d) => x + d.itemCount, 0), value: rows.reduce((x, d) => x + d.value, 0) }
   const period = a.from === monthStart() && a.to === today() ? 'This month' : `${displayDate(a.from) || '…'} to ${displayDate(a.to) || '…'}`
   const cards = [
-    ['Total Damage Entries', rows.length, AlertTriangle, 'bg-danger/10 text-danger'],
-    ['Total Damaged Items', `${totals.items} lines · ${totals.qty} qty`, Boxes, 'bg-warning/15 text-[#b07d24]'],
-    ['Total Damage Value', money(totals.value), CircleDollarSign, 'bg-primary/10 text-primary'],
+    ['Total Damage Entries', rows.length, AlertTriangle, 'red', false, 'Vouchers entered'],
+    ['Total Damaged Items', totals.qty, Boxes, 'amber', false, `${totals.items} product lines`],
+    ['Total Damage Value', totals.value, CircleDollarSign, 'indigo', true, 'At purchase price'],
   ]
   return (
     <>
       <PageHeader title="All Damages" />
       <p className="text-[12px] font-semibold uppercase tracking-wide text-gray-500 mb-2">Summary · {period}</p>
       <div className="grid sm:grid-cols-3 gap-4 mb-6">
-        {cards.map(([label, value, Icon, tone]) => (
-          <div key={label} className="bg-white rounded shadow-sm p-4 flex items-center justify-between">
-            <div><p className="text-[12px] text-gray-500">{label}</p><p className="text-xl font-semibold text-gray-700 mt-1">{value}</p></div>
-            <span className={`w-11 h-11 rounded-full flex items-center justify-center ${tone}`}><Icon size={20} /></span>
-          </div>
+        {cards.map(([label, value, Icon, tone, currency, caption]) => (
+          <StatCard key={label} label={label} value={value} icon={Icon} tone={tone} currency={currency} caption={caption} />
         ))}
       </div>
       <Card>
